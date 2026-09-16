@@ -548,3 +548,104 @@ archive listing. No patch was applied or justified this phase.
 - Worktree note: `e7734452 chore: ignore local build directory` (user
   commit) added `build/` to `.gitignore` between phases; baseline
   otherwise clean.
+
+---
+
+# Phase 3 addendum — interactive skirmish verification (2026-09-17)
+
+Scope: verify the interactive game loop with two opposing participants
+(defeats the Phase 2 ~5 s no-opponent auto-exit). HEAD `6b1a3add`, no
+source changes this phase.
+
+## Setup (existing CLI mechanisms only)
+
+```sh
+./build/rwe --data-path "$HOME/Games/OriginalData/TotalAnnihilation" \
+    --map "Great Divide 2" --width 1280 --height 800 \
+    --player "Player;Human;ARM;0" \
+    --player "Enemy;Computer;CORE;1"
+```
+
+- `--player <name;type;side;color>` (repeatable, ≤10, `"empty"` for open
+  slots). Types: `Human`, `Computer`, `Network,host:port`; sides `ARM`/
+  `CORE`; color 0–9. Metal/energy fixed at 1000/1000.
+- `Computer` exists upstream but is a **passive** opponent — its command
+  queue is fed empty commands (`GameScene.cpp:2015`, `TODO: implement
+  computer AI logic`). Sufficient to keep `computeWinStatus()` at
+  `WinStatusUndecided` (≥2 alive players, GameSimulation.cpp:729-757).
+- Map: `Great Divide 2` — 6×8 Lush, `numplayers=2, 4`, schema 0 defines
+  StartPos1–4. Player index i → `StartPos(i+1)`; each side spawns
+  `sideData.commander` (LoadingScene.cpp:295-314).
+- Note: default `--interface-mode left-click` (authentic TA) — right-click
+  does NOT issue orders, it clears selection/drags minimap
+  (GameScene.cpp:1514-1525). Orders go via orders-panel buttons/hotkeys
+  then left-click. User-reported "orders didn't work" via right-click is
+  **expected upstream behavior**, not a defect.
+
+## Results — two runs
+
+### Run 1: ~13.5 min, ended in a freeze (force-quit)
+
+- Human-confirmed: terrain/textures/units/HUD/cursor all rendered
+  correctly; audio normal; selection worked; user built a vehicle plant,
+  produced **10 FLASH tanks**, and was firing EMGs at the enemy when the
+  window became fully unresponsive → user force-quit.
+- Log signature: heavy `Failed to find goal, visited 1000 vertices`
+  storm (2,558 failed A\* searches — land units repathing toward an
+  unreachable target across the water divide); main loop stopped writing
+  at 00:37:46 mid-storm; no `Finished main loop` line; `proc_exit` ~21 s
+  later; no crash report, no desync dump, no jetsam event.
+- Interpretation: the main thread hung inside a single `update()`/tick —
+  a starved loop would have spammed `Blocked waiting` (only 12 total),
+  and the logger flushes per line so the exit line can't have been lost.
+
+### Run 2: ~28 min, clean graceful exit
+
+- Same command; user played through build-up + combat pathing
+  (126 failed / 44+ found pathfinds), audio streaming throughout,
+  window closed normally — `Finished main loop, exiting` logged.
+- **Freeze did not reproduce.**
+
+## First real runtime finding — intermittent freeze under combat load
+
+- Observed once in ~42 min of gameplay; correlated with sustained combat
+  + repath storm, not with elapsed time.
+- Structural suspects identified (unproven without a stack sample):
+  - `CobExecutionContext::execute()` — `while (!callStack.empty())` with
+    **no instruction bound**; a script loop without a yielding opcode
+    (wait/sleep/block/query) spins forever inside a tick.
+  - `runUnitCobScripts`/`executeThreads` — interrupt statuses
+    (PieceCommand/Query/SetQuery) return without popping the thread; a
+    script emitting piece commands in a wait-less loop alternates
+    executeThreads↔handlePieceCommand indefinitely.
+  - `runCobQuery` (`AimFrom`/`Query`/`SweetSpot`) runs scripts
+    **synchronously** per weapon-aiming tick and must reach
+    FinishedStatus.
+- A\* itself is bounded (1,000 pops; 4,000-closed-vertex/tick budget in
+  PathFindingService) — the storm alone is not the hang.
+- Classification: **unproven** — could be a pre-existing upstream defect
+  (all platforms) or an arm64-divergent value feeding a script loop.
+  No stack sample captured; watchdog armed on run 2 did not trigger.
+- Per policy: **no speculative patch.** Reproduction + `sample <pid>` of
+  the frozen process is the required next diagnostic.
+
+## Verified this phase
+
+| Claim | Evidence |
+|---|---|
+| Sustained sim (28 min vs ~5 s Phase 2) | log timestamps + user play |
+| 2-player game prevents win-condition exit | code (computeWinStatus) + observed |
+| Tick progression, unit orders, pathfinding | log: order→A\* events, repath cycles |
+| Unit production, building, combat initiation | human: plant + 10 Flashes + EMG fire |
+| Terrain/units/UI/cursor render correctly | **human-confirmed** |
+| Selection works | **human-confirmed** |
+| Audio audible and normal | **human-confirmed** + buffer telemetry |
+| Camera/scroll, box-select, keyboard | partially exercised; not itemized |
+| COB animation/scripts | ran (aim scripts execute per weapon tick); visual COB anim not itemized by observer |
+| Graceful exit path | run 2 clean `Finished main loop` |
+
+## Validation
+
+- `rwe_test`: **88/88, 1164 assertions — unchanged** (no source changes).
+- `git diff --check` clean; `rwe`/`rwe_test` Mach-O arm64.
+- No TA assets touched; game data read in place.
