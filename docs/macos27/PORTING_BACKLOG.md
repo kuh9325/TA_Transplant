@@ -117,6 +117,19 @@ Watch items, updated after Phase 2:
   identify the spin site, then classify.
 - Per policy: no speculative patch.
 
+### P3-4. Original-TA command compatibility gaps — UPSTREAM FEATURE PARITY
+
+- Full per-layer audit in `COMPATIBILITY_GAPS.md`.
+- Human-confirmed non-functional: Reclaim, D-Gun, Repair, Patrol.
+- Root pattern: the ARMGEN/CORGEN orders-panel buttons exist in TA data,
+  are instantiated, and fire messages — but `GameScene::onMessage`
+  handles only ATTACK/MOVE/DEFEND/STOP/FIREORD/ONOFF/NEXT/PREV/BUILD/
+  ORDERS. `UnitOrder` has no repair/reclaim/patrol/manual-fire variant.
+- Not a macOS porting defect — upstream feature gap, identical on
+  Linux/Windows. Fn+F10 works, so F-key delivery is not implicated.
+- Proposed order (dependency-aware): Repair → Reclaim → D-Gun → Patrol;
+  F1–F9 parity as a separate low-priority UX track.
+
 ### P3-2. Float determinism across architectures
 
 - **Evidence**: `SimScalar` is `float`-backed; clang/arm64 may emit FMA
