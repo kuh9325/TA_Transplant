@@ -354,3 +354,62 @@ clang++ -O0 -std=c++20 /tmp/rwe_probe/conv.cpp -o conv_O0 && ./conv_O0
 - Gameplay with actual TA assets (per rules — not sought, not copied)
 - Fullscreen mode, audio output, networking, `rwe_bridge` IPC
 - `make install` / `make package`
+
+---
+
+# Phase 1 addendum — arm64 angle-conversion fix (2026-09-16)
+
+## Root cause (confirmed, mechanism verified)
+
+`static_cast<uint16_t>(negative_float)` is out-of-range float→unsigned
+conversion (UB). x86-64 lowers it to `cvttss2si` (signed 32-bit convert) +
+truncation → modular 16-bit wrap; arm64 lowers it to `fcvtzu` (unsigned
+saturating convert) → 0. The engine relied on the x86 artifact.
+
+## Files changed
+
+| File | Site | Change |
+|---|---|---|
+| `src/rwe/sim/SimAngle.cpp:13` | `fromRadians` | `std::round` → `std::llround` |
+| `src/rwe/cob/cob_util.cpp:41` | `toCobAngle` | `std::round` → `std::llround` |
+| `src/rwe/sim/SimAngle.h:41` | `simAngleFromSimScalar` | `static_cast<int64_t>` intermediate |
+| `src/rwe/sim/SimAngle.test.cpp` | `toRadians` case | +SECTION "converts radians to SimAngle" (4 deterministic REQUIREs locking negative→wrap: −π→32768, −π/2→49152) |
+
+## Chosen defined semantics
+
+float → signed `long long`/`int64_t` (defined; inputs are provably bounded to
+±32768 for the rounding sites, asserted ≥0 for the truncating site) →
+`uint16_t` (defined modular reduction mod 2^16, C++20 [conv.integral]).
+
+- Rounding sites: `std::llround` preserves the exact round-half-away-from-zero
+  behavior of `std::round`; the integer result then wraps mod 2^16.
+- Truncating site: `static_cast<int64_t>` preserves truncation-toward-zero;
+  defined for all |value| < 2^63 (covers every meaningful input; x86 results
+  beyond that were already meaningless UB artifacts).
+- Produces bit-identical results to historical x86 behavior on every input
+  where x86 was meaningful: 0→0, +π/2→16384, −π/2→49152, ±π→32768,
+  and all in-between values wrap mod 2^16 on both architectures.
+- No API/type/representation changes; no shared helper added (none exists —
+  `rwe::wrap(int,int)` only wraps integers post-conversion).
+
+## Test results
+
+- Before: 88 cases / **86 pass / 2 fail** (`cob_util` deterministic +
+  `SimAngle` prop, seed `13223679111204649236`).
+- After: **88/88 pass, 1164 assertions** (~0.14 s). Focused reruns with the
+  previously-failing seed pass. `git diff --check` clean; no new warnings;
+  `file`/`lipo` confirm `rwe`/`rwe_test` remain Mach-O arm64.
+- Startup probe rerun: unchanged — SDL window + GL 4.1 Metal core + GLEW +
+  ImGui OK, stops at expected `~/.rwe/Data` missing-data modal.
+
+## Remaining uncertainty
+
+- `simAngleFromSimScalar` divergence surface is assert-guarded
+  (`s.value >= 0`) and was only UB for negative/out-of-range floats; the
+  fix hardens it identically, but no runtime divergence was ever observed
+  from that site.
+- `simScalarToUInt` retains the same UB shape (float→`unsigned int`) for
+  negative inputs; its call sites pass non-negative quantities — flagged
+  in the backlog as residual risk, not touched per phase scope.
+- Cross-platform equivalence is established by static reasoning +
+  instruction-level evidence, not by executing x86 builds.

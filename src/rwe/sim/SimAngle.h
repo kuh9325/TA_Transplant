@@ -38,7 +38,7 @@ namespace rwe
     inline SimAngle simAngleFromSimScalar(SimScalar s)
     {
         assert(s.value >= 0.0f);
-        return SimAngle(static_cast<uint16_t>(s.value));
+        return SimAngle(static_cast<uint16_t>(static_cast<int64_t>(s.value)));
     }
 
     SimAngle atan(SimScalar v);

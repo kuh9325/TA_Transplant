@@ -69,7 +69,7 @@ Watch items once real data is available:
 
 ## P3 — prevents correct gameplay
 
-### P3-1. float→uint16 UB in angle conversion saturates on arm64
+### P3-1. float→uint16 UB in angle conversion saturates on arm64 — RESOLVED
 
 - **Sites**: `src/rwe/sim/SimAngle.cpp:13` (`fromRadians`),
   `src/rwe/sim/SimAngle.h:41` (SimScalar→SimAngle),
@@ -77,13 +77,14 @@ Watch items once real data is available:
 - **Evidence**: `rwe_test` failures — `cobAtan(-1,0)` → 0 (want 49152);
   `fromRadians(toRadians(32768))` → 0 (want 32768). Scratch binary shows
   `fcvtzu` saturation to 0 on arm64 vs `cvttss2si` truncation-wrap on x86.
-- **Impact**: negative TA angles silently become 0 — unit turret/body
-  headings and COB script results wrong on arm64.
-- **Fix direction (later phase, evidence-based)**: convert through a signed
-  wide type before truncating (e.g. `static_cast<uint16_t>(static_cast<int32_t>
-  (std::round(...)))`), preserving the x86 wrap semantics that tests encode.
-  Do NOT "fix" the tests.
-- **Also audit**: any other narrowing float→int casts that rely on wrap.
+- **Fix applied** (Phase 1): `std::round`→`std::llround` at the two rounding
+  sites; `static_cast<int64_t>` intermediate at the truncating site. All
+  conversions now go float→signed-wide-int (defined) → `uint16_t` (defined
+  mod 2^16). All 88 test cases pass on arm64.
+- **Residual risk** (deliberately out of scope, same UB shape):
+  `SimScalar.h` `simScalarToUInt` casts float→`unsigned int`; used for
+  sea-level/damage/frame-lifetime quantities that are non-negative by
+  contract. No failing test evidence; revisit only if a divergence appears.
 
 ### P3-2. Float determinism across architectures
 

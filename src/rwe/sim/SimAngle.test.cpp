@@ -46,6 +46,14 @@ namespace rwe
             REQUIRE(toRadians(SimAngle(49152)).value == Catch::Approx(-Pif / 2.0f));
         }
 
+        SECTION("converts radians to SimAngle")
+        {
+            REQUIRE(fromRadians(RadiansAngle(0.0f)) == SimAngle(0));
+            REQUIRE(fromRadians(RadiansAngle(Pif / 2.0f)) == SimAngle(16384));
+            REQUIRE(fromRadians(RadiansAngle(-Pif)) == SimAngle(32768));
+            REQUIRE(fromRadians(RadiansAngle(-Pif / 2.0f)) == SimAngle(49152));
+        }
+
         rc::prop("fromRadians inverts toRadians", [](SimAngle a) {
             auto f = toRadians(a);
             RC_LOG() << "f: " << f << std::endl;
