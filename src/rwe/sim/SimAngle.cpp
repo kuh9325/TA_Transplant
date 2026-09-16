@@ -10,7 +10,7 @@ namespace rwe
     }
     SimAngle fromRadians(RadiansAngle angle)
     {
-        return SimAngle(static_cast<uint16_t>(std::round((angle.value / Pif) * 32768.0f)));
+        return SimAngle(static_cast<uint16_t>(std::llround((angle.value / Pif) * 32768.0f)));
     }
     SimAngle atan(SimScalar v)
     {
