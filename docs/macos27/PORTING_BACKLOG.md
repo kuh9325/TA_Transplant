@@ -98,6 +98,25 @@ Watch items, updated after Phase 2:
   sea-level/damage/frame-lifetime quantities that are non-negative by
   contract. No failing test evidence; revisit only if a divergence appears.
 
+### P3-3. Intermittent freeze under sustained combat load — UNCONFIRMED CAUSE
+
+- **Evidence** (Phase 3): one freeze in ~42 min of interactive play on
+  `Great Divide 2`. User was firing EMGs with 10 FLASH tanks during a
+  failed-pathfind storm (unreachable target across the divide). Window
+  became fully unresponsive → force-quit; log stops mid-tick with no
+  graceful-exit line; no crash report / desync dump / jetsam.
+- **Structural suspects** (unproven — no stack sample yet):
+  `CobExecutionContext::execute()` has no instruction bound;
+  `executeThreads` re-enters on interrupt statuses without popping;
+  `runCobQuery` executes `AimFrom`/`Query`/`SweetSpot` synchronously.
+  A wait-less COB loop would hang a tick permanently.
+- **Not proven platform-specific**: could equally be an upstream
+  all-platforms defect or an arm64-divergent value feeding a script.
+- **Next diagnostic**: reproduce with 10+ units mass-attacking an
+  unreachable target under fire; `sample <pid>` the frozen process to
+  identify the spin site, then classify.
+- Per policy: no speculative patch.
+
 ### P3-2. Float determinism across architectures
 
 - **Evidence**: `SimScalar` is `float`-backed; clang/arm64 may emit FMA
