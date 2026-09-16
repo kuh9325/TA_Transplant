@@ -57,15 +57,27 @@ SDL window, GL 4.1 Metal core context, GLEW, ImGui all functional.
 
 ## P2 — prevents loading original game data
 
-_None confirmed._ VFS, case-insensitive lookup, and all TA parsers compile
-and their unit tests pass. Data-path resolution (`~/.rwe/Data`,
-`--data-path`) works; absent data produces a graceful modal error.
+_None confirmed — now verified against real data_ (Phase 2, 2026-09-17).
+A stock install directory at `~/Games/OriginalData/TotalAnnihilation`
+(`totala1-4.hpi`, `rev31.gp3`, `ccdata/ccmaps/ccmiss.ccx`, `BT*.CCX`,
+map `.ufo`s, loose `Objects3D/`) is read **in place** via `--data-path`.
+Main menu reached (palettes, ALLSOUND.TDF, cursors GAF, SIDEDATA.TDF,
+MAINMENU.GUI) and a skirmish map loaded and ticked
+(`--map "Great Divide 2"` — OTA, TNT, FBI/3DO/COB, audio streaming).
+No P2 blocker found.
 
-Watch items once real data is available:
+Watch items, updated after Phase 2:
 
-- HPI/TNT/GAF/3DO/COB parsers read raw LE structs — fine on arm64 (LE), but
-  real-data smoke tests should verify.
-- Audio decode paths (WAV in HPI archives via SDL3_mixer) — untested.
+- ~~HPI/TNT/GAF/3DO/COB parsers vs real data~~ — VERIFIED working
+  (archives with ZLib-compressed members, mixed-case internal paths).
+- ~~Audio decode paths~~ — mixer streams buffers; actual sound content
+  correctness still unverified.
+- Map-name lookup requires exact internal archive names
+  (`maps/<name>.ota`, e.g. `"Great Divide 2"`, spaces not underscores).
+- Deeper gameplay (opponents, orders, COB under load) untested — the
+  Phase 2 skirmish auto-ended via correct win/draw logic after ~5 s.
+- Screenshot-based visual verification pending (screen-recording
+  permission blocked `screencapture`).
 
 ## P3 — prevents correct gameplay
 

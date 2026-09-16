@@ -413,3 +413,138 @@ float → signed `long long`/`int64_t` (defined; inputs are provably bounded to
   in the backlog as residual risk, not touched per phase scope.
 - Cross-platform equivalence is established by static reasoning +
   instruction-level evidence, not by executing x86 builds.
+
+---
+
+# Phase 2 addendum — real-data runtime smoke test (2026-09-17)
+
+Scope: determine how far unmodified RWE (Phase 1 state, HEAD `25c5a728`)
+gets with real Total Annihilation data on arm64 macOS. No engine source
+was changed this phase — **no runtime blocker was found**.
+
+## Game data
+
+- Path used: `~/Games/OriginalData/TotalAnnihilation` — an existing,
+  legally obtained Windows-era TA install directory. Inspected read-only;
+  nothing copied, renamed, modified, or committed.
+- Layout: stock install-dir contents — `totala1-4.hpi`, `rev31.gp3`,
+  `revision.gpf`, `ccdata.ccx`/`ccmaps.ccx`/`ccmiss.ccx`, `BTDATA.CCX`/
+  `BTMAPS.CCX`, `newunit.ccx`, `tactics1-8.hpi`, map packages
+  (`Metal_Heck_2.UFO`, `great divide 2.ufo`, `cdmaps.ufo`), loose
+  `Objects3D/`, plus Windows executables/DLLs (ignored by RWE).
+- RWE reads it **in place**: `--data-path <dir>` mounts the directory and
+  scans for `.{hpi,ufo,ccx,gpf,gp3}` (case-insensitive extension match);
+  loose files take precedence, `.gp3` archives take precedence over others.
+  Case-insensitive internal path lookup (`findPathCaseInsensitive`)
+  handles the mixed-case archive contents; APFS default case-insensitivity
+  makes loose-file access additionally forgiving.
+
+## Commands used
+
+```sh
+# Stage J probe — main menu
+./build/rwe --data-path "$HOME/Games/OriginalData/TotalAnnihilation"
+
+# Stage K probe — direct skirmish (bypasses menu UI)
+./build/rwe --data-path "$HOME/Games/OriginalData/TotalAnnihilation" \
+    --map "Great Divide 2" --player "Test;Human;ARM;0"
+```
+
+Note: `--map` resolves `maps/<name>.ota` inside the VFS, so the argument
+must match the archive's internal filename (e.g. `"Great Divide 2"` —
+spaces, not underscores). An earlier probe with `--map Metal_Heck_2`
+failed with `Failed to read OTA file` purely because the archive's
+internal name is `Metal Heck 2.ota`; input error, not an engine defect.
+Archive contents verified read-only with `./build/hpi_test <archive>`.
+
+## Results
+
+**Main-menu run: Stage J reached, no errors.**
+
+```
+Initializing SDL / OpenGL context (4.1 Metal - 91.7, Apple M4, GLSL 4.10)
+Initializing virtual file system
+Loading palette                      (PALETTE.PAL from HPI)
+Loading GUI palette                  (GUIPAL.GUI)
+Loading global sound definitions     (ALLSOUND.TDF)
+Loading cursors                      (anims/cursors.GAF)
+Loading side data                    (SIDEDATA.TDF)
+Launching into the main menu         (MAINMENU.GUI loaded + built)
+Entering main loop
+Finished main loop, exiting          (graceful, external quit)
+```
+
+**Skirmish run ("Great Divide 2"): Stage K reached.**
+
+```
+Launching into game on map: Great Divide 2
+Opening listen socket on port 1337
+we are loading  (≈1.9 s — OTA + TNT + FBI/3DO/COB unit load)
+we are ready    (game scene entered, sim ticking)
+Buffer levels (real/target) 14/14 ...  (SDL3_mixer actively streaming)
+Finished main loop, exiting   (≈5.2 s after "ready")
+```
+
+The ~5 s auto-exit is **correct engine behavior, not a crash**:
+`GameScene::update` calls `simulation.computeWinStatus()` each tick;
+`WinStatusWon`/`WinStatusDraw` schedules `requestExit()` after
+`SceneTime(5*30)` ticks (GameScene.cpp:2366-2377). A 1-player game with
+no opponents satisfies a terminal condition immediately. Timeline matches
+exactly (ready 00:11:05.95 → exit 00:11:11.14).
+
+Main-menu runs also exited cleanly after ~7–23 s via `SDL_EVENT_QUIT`
+(window close / Cmd+Q — the only menu exit paths; no self-quit exists in
+menu code). System logs show orderly SDL/CoreAudio teardown, no crash
+report.
+
+## Runtime-stage classification
+
+| Stage | Result |
+|---|---|
+| A SDL/window | PASS (Cocoa) |
+| B OpenGL/renderer | PASS (4.1 Metal core) |
+| C game-data path accepted | PASS |
+| D archive/VFS discovery | PASS (all archive types, mixed case) |
+| E palette/core assets | PASS |
+| F config/TDF parsing | PASS (ALLSOUND.TDF, SIDEDATA.TDF, OTA) |
+| G graphics assets | PASS (cursors GAF, GUI, TNT terrain, 3DO) |
+| H audio | PASS (SDL3_mixer streaming; buffer telemetry active) |
+| I UI/menu construction | PASS (MAINMENU.GUI) |
+| J main menu | **PASS** |
+| K skirmish/game init | **PASS** (map load + sim ticks + audio) |
+
+**Furthest stage: K — no runtime blocker identified.**
+
+## First-blocker analysis
+
+None. The only failure observed (`Failed to read OTA file` on
+`Metal_Heck_2`) was a wrong map-name argument, resolved by reading the
+archive listing. No patch was applied or justified this phase.
+
+## Caveats / unresolved risks
+
+- Visual verification is inferred from logs + scene entry, not
+  screenshots — `screencapture` failed with "could not create image from
+  display" (screen-recording permission), so text/texture corruption is
+  unconfirmed. A human looked at the window during runs without reporting
+  artifacts, but this is not rigorously verified.
+- The skirmish ran ~5 s with no opponents before auto-exit; deeper
+  gameplay (real opponents, orders, combat, COB scripts under load) is
+  untested.
+- Input interaction was not exercised (probes ran unattended; exits came
+  from window close and the win/draw timer).
+- Networking was initialized (UDP socket on 1337, asio) but no peer
+  traffic was tested.
+- Full audio *content* correctness unverified — mixer streamed buffers
+  (internal telemetry) but actual sounds were not audited.
+- `Float determinism` (P3-2) and `simScalarToUInt` residual risk remain
+  as documented; nothing new observed.
+
+## Validation
+
+- `./build/rwe_test`: **88/88 cases, 1164 assertions — unchanged**
+  (Phase 1 result intact; no source changed).
+- `git diff --check`: clean. `file build/rwe`: Mach-O arm64.
+- Worktree note: `e7734452 chore: ignore local build directory` (user
+  commit) added `build/` to `.gitignore` between phases; baseline
+  otherwise clean.
