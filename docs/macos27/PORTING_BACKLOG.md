@@ -130,6 +130,40 @@ Watch items, updated after Phase 2:
 - Proposed order (dependency-aware): Repair → Reclaim → D-Gun → Patrol;
   F1–F9 parity as a separate low-priority UX track.
 
+### P3-5. F10 Game Debug overlay input-routing deadlock — RESOLVED
+
+- **Symptoms** (Phase 4 QA): with the F10 Game Debug window open the
+  pointer could not visibly/interactively move onto the ImGui window,
+  and Shift-queued commands stopped working.
+- **Root causes** (proven by temporary event-route instrumentation,
+  `RWE_IMGUI_TRACE`; instrumentation removed before commit):
+  - `ImGuiContext::processEvent` forwarded mouse events to ImGui only
+    when `io.WantCaptureMouse` was already true. That flag is computed
+    from `io.MousePos`, which is only updated by forwarded motion
+    events — a circular dependency: `io.MousePos` froze at a stale
+    value, capture never engaged, clicks were never delivered to ImGui
+    *and* leaked through into gameplay.
+  - `io.WantCaptureKeyboard` stays true while any ImGui window is
+    focused (`NavEnableKeyboard`), so every subsequent keydown —
+    including command keys and modifier transitions — was consumed;
+    gameplay went keyboard-dead while the window was focused.
+- **Fix applied**:
+  - `ImGuiContext::processEvent` now always forwards input events to
+    ImGui (keeps `io` state current) and decides consumption separately
+    per class: mouse events consumed iff `WantCaptureMouse`,
+    keyboard/text iff `WantTextInput`.
+  - `GameScene::isShiftDown`/`isCtrlDown` read `SDL_GetModState()`
+    (authoritative) instead of event-tracked bools that could go stale
+    when ImGui consumed modifier transitions.
+  - Explicit cursor ownership in `SceneManager::execute`: native cursor
+    shown while ImGui captures the mouse, RWE custom cursor rendered
+    last (on top of ImGui draw data) otherwise.
+  - Window mouse-grab (`main.cpp`, edge-panning) verified unaffected —
+    the panel is inside the grabbed window.
+- **Human QA: PASS** — native pointer over the window, controls
+  clickable, no click-through, Shift+M queueing works while open and
+  after closing, custom cursor restored on close.
+
 ### P3-2. Float determinism across architectures
 
 - **Evidence**: `SimScalar` is `float`-backed; clang/arm64 may emit FMA
