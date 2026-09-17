@@ -120,15 +120,31 @@ Watch items, updated after Phase 2:
 ### P3-4. Original-TA command compatibility gaps — UPSTREAM FEATURE PARITY
 
 - Full per-layer audit in `COMPATIBILITY_GAPS.md`.
-- Human-confirmed non-functional: Reclaim, D-Gun, Repair, Patrol.
+- Human-confirmed non-functional: Reclaim, D-Gun, Patrol.
+  **Repair: implemented and human-QA'd in Phase 4** (see
+  COMPATIBILITY_GAPS.md §2 — now `connected`).
 - Root pattern: the ARMGEN/CORGEN orders-panel buttons exist in TA data,
   are instantiated, and fire messages — but `GameScene::onMessage`
   handles only ATTACK/MOVE/DEFEND/STOP/FIREORD/ONOFF/NEXT/PREV/BUILD/
-  ORDERS. `UnitOrder` has no repair/reclaim/patrol/manual-fire variant.
+  ORDERS/REPAIR. `UnitOrder` has no reclaim/patrol/manual-fire variant.
 - Not a macOS porting defect — upstream feature gap, identical on
   Linux/Windows. Fn+F10 works, so F-key delivery is not implicated.
-- Proposed order (dependency-aware): Repair → Reclaim → D-Gun → Patrol;
-  F1–F9 parity as a separate low-priority UX track.
+- Proposed order (dependency-aware): ~~Repair~~ → Reclaim → D-Gun →
+  Patrol; F1–F9 parity as a separate low-priority UX track.
+- **Phase 4 follow-up fix**: latent upstream defect exposed by Repair
+  QA — `buildExistingUnit` evaluated `target.isBeingBuilt()` against the
+  *builder's* `UnitDefinition`, so ordinary constructors (small
+  `buildTime`) could not resume partially-built structures while
+  commanders (huge `buildTime`) masked it. Now evaluated against the
+  target's own definition; regression-covered with deliberately
+  mismatched builder/target `buildTime`s.
+- **Phase 4 geometry fix**: Repair and CompleteBuild working-range
+  checks previously measured builder→target *center* distance against
+  `buildDistance`; footprint collision kept short-range (T1)
+  constructors outside the threshold on large buildings while longer-
+  range T2 constructors still reached. Both paths now share
+  `inWorkingRange` (builder position → target footprint perimeter via
+  `findClosestPointToFootprintXZ`) in `UnitBehaviorService`.
 
 ### P3-5. F10 Game Debug overlay input-routing deadlock — RESOLVED
 
@@ -188,6 +204,18 @@ Watch items, updated after Phase 2:
   (`-Wreturn-stack-address`). Platform-independent; fix upstream first.
 - **P4-6. Deprecated literal-operator warnings** (`"" _ss`/`"" _ssf`) under
   Clang 21 — cosmetic; will hard-error under a future standard. Defer.
+- **P4-7. Nanolathe visual fidelity**: `drawNanoLine()`
+  (`src/rwe/game/GameScene_util.cpp:677`) emits a single solid green
+  `pushLine`. Original TA renders the nanolathe as a stream/spray of small
+  green particles. Pre-existing RWE simplification — affects Build,
+  CompleteBuild, Repair, and (later) Reclaim equally; not a Repair
+  regression. All nanolathe rendering funnels through one call site
+  (`src/rwe/game/GameScene.cpp:841` via
+  `UnitState::getActiveNanolatheTarget`), so a single shared particle-spray
+  implementation would cover every command path. Existing infrastructure to
+  reuse: `Particle`/`ParticleRenderTypeWake` quads rendered into
+  `squareParticlesBatch` (`drawWakeParticle`), or small quads in the
+  existing `ColoredMeshBatch` along the nanoOrigin→target segment.
 
 ## FUTURE — optional modernization (explicitly NOT in scope now)
 

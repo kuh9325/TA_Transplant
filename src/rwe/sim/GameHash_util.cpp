@@ -158,6 +158,13 @@ namespace rwe
         return GameHash(0);
     }
 
+    GameHash computeHashOf(const UnitBehaviorStateRepairing& s)
+    {
+        return combineHashes(
+            s.targetUnit,
+            s.repairProgress);
+    }
+
     GameHash computeHashOf(const UnitBehaviorStateCreatingUnit& s)
     {
         return combineHashes(

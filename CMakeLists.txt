@@ -760,10 +760,13 @@ set(TEST_FILES
     src/rwe/math/rwe_math.test.cpp
     src/rwe/network_util.test.cpp
     src/rwe/pathfinding/pathfinding_utils.test.cpp
+    src/rwe/proto/serialization.test.cpp
     src/rwe/rc_gen_optional.h
     src/rwe/sim/GameHash_util.test.cpp
     src/rwe/sim/SimAngle.test.cpp
     src/rwe/sim/SimVector.test.cpp
+    src/rwe/sim/UnitBehaviorService.test.cpp
+    src/rwe/sim/UnitState.test.cpp
     src/rwe/sim/UnitState_util.test.cpp
     src/rwe/sim/util.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp

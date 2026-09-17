@@ -39,6 +39,8 @@ namespace rwe
 
     GameHash computeHashOf(const UnitBehaviorStateBuilding& s);
 
+    GameHash computeHashOf(const UnitBehaviorStateRepairing& s);
+
     GameHash computeHashOf(const UnitBehaviorStateCreatingUnit&);
 
 

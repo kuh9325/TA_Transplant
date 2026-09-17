@@ -172,6 +172,84 @@ namespace rwe
         return buildTimeCompleted == unitDefinition.buildTime;
     }
 
+    unsigned int UnitState::getRepairProgressForHitPoints(const UnitDefinition& unitDefinition) const
+    {
+        if (unitDefinition.maxHitPoints == 0)
+        {
+            return 0;
+        }
+        return (hitPoints * unitDefinition.buildTime) / unitDefinition.maxHitPoints;
+    }
+
+    UnitState::BuildCostInfo UnitState::getRepairCostInfo(const UnitDefinition& unitDefinition, unsigned int repairProgress, unsigned int buildTimeContribution) const
+    {
+        if (unitDefinition.buildTime == 0)
+        {
+            return BuildCostInfo{0, Energy(0), Metal(0)};
+        }
+
+        auto remainingBuildTime = unitDefinition.buildTime - repairProgress;
+        if (buildTimeContribution > remainingBuildTime)
+        {
+            buildTimeContribution = remainingBuildTime;
+        }
+
+        auto oldProgressEnergy = Energy((repairProgress * unitDefinition.buildCostEnergy.value) / unitDefinition.buildTime);
+        auto oldProgressMetal = Metal((repairProgress * unitDefinition.buildCostMetal.value) / unitDefinition.buildTime);
+
+        auto newProgress = repairProgress + buildTimeContribution;
+
+        auto newProgressEnergy = Energy((newProgress * unitDefinition.buildCostEnergy.value) / unitDefinition.buildTime);
+        auto newProgressMetal = Metal((newProgress * unitDefinition.buildCostMetal.value) / unitDefinition.buildTime);
+
+        auto deltaEnergy = newProgressEnergy - oldProgressEnergy;
+        auto deltaMetal = newProgressMetal - oldProgressMetal;
+
+        return BuildCostInfo{buildTimeContribution, deltaEnergy, deltaMetal};
+    }
+
+    bool UnitState::addRepairProgress(const UnitDefinition& unitDefinition, unsigned int& repairProgress, unsigned int buildTimeContribution)
+    {
+        if (unitDefinition.buildTime == 0 || unitDefinition.maxHitPoints == 0)
+        {
+            return true;
+        }
+
+        // If the unit took damage since the last repair tick,
+        // re-anchor the progress axis to current hit points
+        // so the lost health is worked off again.
+        auto impliedHitPoints = (repairProgress * unitDefinition.maxHitPoints) / unitDefinition.buildTime;
+        if (hitPoints < impliedHitPoints)
+        {
+            repairProgress = getRepairProgressForHitPoints(unitDefinition);
+        }
+
+        auto remainingBuildTime = unitDefinition.buildTime - repairProgress;
+        if (buildTimeContribution > remainingBuildTime)
+        {
+            buildTimeContribution = remainingBuildTime;
+        }
+
+        auto oldProgressHp = (repairProgress * unitDefinition.maxHitPoints) / unitDefinition.buildTime;
+
+        repairProgress += buildTimeContribution;
+
+        auto newProgressHp = (repairProgress * unitDefinition.maxHitPoints) / unitDefinition.buildTime;
+
+        auto deltaHp = newProgressHp - oldProgressHp;
+
+        if (hitPoints + deltaHp >= unitDefinition.maxHitPoints)
+        {
+            hitPoints = unitDefinition.maxHitPoints;
+        }
+        else
+        {
+            hitPoints += deltaHp;
+        }
+
+        return hitPoints >= unitDefinition.maxHitPoints;
+    }
+
     void UnitState::moveObject(const std::string& pieceName, SimAxis axis, SimScalar targetPosition, SimScalar speed)
     {
         auto piece = findPiece(pieceName);
@@ -642,6 +720,12 @@ namespace rwe
         if (buildingState && buildingState->nanoParticleOrigin)
         {
             return std::make_pair(buildingState->targetUnit, *buildingState->nanoParticleOrigin);
+        }
+
+        auto repairingState = std::get_if<UnitBehaviorStateRepairing>(&behaviourState);
+        if (repairingState && repairingState->nanoParticleOrigin)
+        {
+            return std::make_pair(repairingState->targetUnit, *repairingState->nanoParticleOrigin);
         }
 
         auto factoryBuildingState = std::get_if<FactoryBehaviorStateBuilding>(&factoryState);

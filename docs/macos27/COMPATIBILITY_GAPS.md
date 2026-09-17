@@ -9,7 +9,9 @@ F12 clear chat; order keys A/G/M/P/S/D/C/R/E/L/U/K/O/B/V/F/X/T/N/H).
 Human-observed runtime evidence (authoritative):
 - **Fn+F10: WORKS** — RWE debug window opens → SDL function-key delivery
   is fine on macOS; F-key gaps are missing RWE bindings, not Fn issues.
-- **Reclaim / D-Gun / Repair / Patrol: not working.**
+- **Reclaim / D-Gun / Patrol: not working.**
+- **Repair: implemented Phase 4** — order/cursor/proto/behavior complete,
+  human-QA'd end-to-end (see §2 addendum).
 
 Classification legend:
 - **connected** — implemented and wired end-to-end
@@ -33,7 +35,7 @@ Classification legend:
 | F11 | SDLK_F11 bound (SceneManager.cpp:123) — Global Debug | n/a | n/a | n/a | n/a | n/a | n/a | — | **connected** (matches TA debug-toggle role) |
 | Reclaim | `e` quickkey on ARMRECLAIM/CORRECLAIM fires ActivateMessage → `onMessage` ignores | button instantiated from ARMGEN.GUI, unwired | `cursorreclamate` in CURSORS.GAF, NOT loaded (no `CursorType::Reclaim`) | absent | absent | absent | absent | `reclaimable`, `autoreclaimable`, `metal`, `energy` on FeatureDefinition — parsed, shown only in hover M:/E: text (GameScene.cpp:481-493) | **absent** (UI data present, everything below it missing) |
 | D-Gun | `d` quickkey on ARMBLAST/CORBLAST fires ActivateMessage → ignored | button instantiated, unwired | `cursorairstrike` in CURSORS.GAF, NOT loaded | absent | absent | absent | weapons[2] never targeted: `attackTarget` loops `i < 2` (UnitBehaviorService.cpp:904); `commandFire` only suppresses auto-acquire (:347); `tryFireWeapon` itself is slot-generic | `commandfire` flag, FBI `Weapon3`, ARM_DISINTEGRATOR weapon TDF — parsed | **absent** (fire machinery exists per-slot but no path reaches weapon 3; per-shot `energycost` also not consumed — see §4) |
-| Repair | `r` quickkey on ARMREPAIR/CORREPAIR fires ActivateMessage → ignored | button instantiated, unwired | `CursorType::Repair` loaded + shown — but only when hovering an `isBeingBuilt` friendly unit or as CompleteBuildOrder cursor (GameScene.cpp:636, 1938) | `CompleteBuildOrder` exists (construction only) | `CompleteBuildOrder` serialized; no repair order | `CompleteBuildOrder` — gates on `isBeingBuilt` | `buildExistingUnit`/`deployBuildArm` exist but bail unless `target.isBeingBuilt()` (UnitBehaviorService.cpp:1349, 1381) → damaged-completed units rejected | `repair` sound parsed + loaded + mapped (`UnitSoundType::Repair`→`c.repair`, GameScene.cpp:2130) but never emitted | **assist-only** — nanolathe pipeline exists for construction; repair semantics absent |
+| Repair | `r` quickkey fires ActivateMessage → `onMessage` → `RepairCursorMode` | button wired; contextual repair when a builder is selected over a damaged friendly | `CursorType::Repair` + contextual precedence | `RepairOrder` | `RepairOrder` serialized | `UnitBehaviorStateRepairing` | `repairExistingUnit` — navigate → shared `inWorkingRange` (footprint-aware) → stance → HP restore + proportional resource drain | `repair` sound emitted on order issue | **connected** (Phase 4, human-QA'd) |
 | Patrol | `p` quickkey on ARMPATROL/CORPATROL fires ActivateMessage → ignored | button instantiated, unwired | `cursorpatrol` in CURSORS.GAF, NOT loaded | absent | absent | absent | absent | — | **absent** (button + cursor data only) |
 
 Other unwired ARMGEN orders buttons discovered incidentally (same gap
@@ -75,6 +77,23 @@ Missing for TA-compatible repair:
 (target selection), REPAIR button wiring, repair behavior branch
 (accept friendly unit with `health < maxHealth && !isBeingBuilt()`),
 HP restoration + resource-cost semantics, repair sound emission.
+
+**Phase 4 addendum — implemented and human-verified.** All of the above
+now exists: `RepairOrder` (proto + serialization round-trip),
+`RepairCursorMode`, REPAIR button + `r` quickkey wiring,
+`UnitBehaviorStateRepairing` (navigate → shared footprint-aware
+`inWorkingRange` → build stance → HP restore at proportional resource
+cost → complete at full HP), repair sound, self-target rejection, and
+guard-assist for a target already being repaired. Contextual repair:
+builder selected + damaged friendly completed target yields the Repair
+cursor/click before the Select branch (units remain selectable);
+under-construction targets keep CompleteBuild/assist. Human QA PASS:
+commander/T1/T2 constructors on damaged buildings and mobile units,
+contextual + explicit activation, full-HP completion. Two latent defects
+found and fixed at source: `buildExistingUnit` evaluated
+`isBeingBuilt` with the builder's definition (broke ordinary-builder
+construction resumption), and center-distance range checks (broke T1
+repair of large buildings) — both now regression-tested.
 
 ## 3. Patrol — bottom-up audit
 
@@ -169,11 +188,11 @@ Shared spine every order needs: GUI button wiring (`onMessage` +
 → proto field + serialization visitors → `UnitOrder` variant →
 `UnitBehaviorService` handler.
 
-1. **Repair** — most shared infrastructure, most gameplay-critical:
+1. **Repair** — ~~most shared infrastructure, most gameplay-critical:
    nanolathe pipeline (navigate→stance→deployBuildArm→resource drain)
    exists end-to-end; needs a `RepairOrder` + damaged-unit acceptance +
    HP-restore semantics + cursor mode + button wiring + sound hookup.
-   Establishes the "targeted support order" pattern.
+   Establishes the "targeted support order" pattern.~~ **DONE (Phase 4).**
 2. **Reclaim** — same pattern as Repair (cursor mode → targeted order →
    nanolathe) applied to the feature domain; adds resource *income* and
    the `cursorreclamate` load. Builds directly on the Repair-established
@@ -191,3 +210,16 @@ Shared spine every order needs: GUI button wiring (`onMessage` +
 
 Do not implement multiple orders in one phase — each warrants its own
 focused phase with regression coverage.
+
+## 8. Nanolathe visual fidelity (cross-cutting, non-command)
+
+Human-observed (Phase 4 QA): RWE draws the nanolathe as a single solid
+green line (`drawNanoLine`, `src/rwe/game/GameScene_util.cpp:677` →
+`pushLine(..., Vector3f(0,1,0))`). Original TA renders a spray/stream of
+small green particles. Pre-existing upstream simplification shared by
+Build, CompleteBuild, Repair, and future Reclaim — all paths funnel
+through `UnitState::getActiveNanolatheTarget` → one draw call site
+(`src/rwe/game/GameScene.cpp:841`). Repair functionally activates the
+existing effect correctly. Tracked as backlog P4-7; a future shared
+particle-spray implementation can reuse the existing `Particle`/quad
+batch infrastructure.

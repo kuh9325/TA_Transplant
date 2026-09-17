@@ -50,6 +50,11 @@ message GuardOrder
     required int32 unit = 1;
 }
 
+message RepairOrder
+{
+    required int32 unit = 1;
+}
+
 message PlayerUnitCommand
 {
     message IssueOrder
@@ -68,6 +73,7 @@ message PlayerUnitCommand
             BuildOrder build = 4;
             CompleteBuildOrder complete_build = 5;
             GuardOrder guard = 6;
+            RepairOrder repair = 7;
         }
     }
 
