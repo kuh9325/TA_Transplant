@@ -159,6 +159,11 @@ namespace rwe
         UnitId unitId;
     };
 
+    struct UnitStartedRepairingEvent
+    {
+        UnitId unitId;
+    };
+
     struct EmitParticleFromPieceEvent
     {
         enum class SfxType
@@ -204,6 +209,7 @@ namespace rwe
         UnitSpawnedEvent,
         UnitDiedEvent,
         UnitStartedBuildingEvent,
+        UnitStartedRepairingEvent,
         ProjectileSpawnedEvent,
         ProjectileDiedEvent>;
 

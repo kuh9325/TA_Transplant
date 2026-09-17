@@ -75,10 +75,24 @@ namespace rwe
         std::optional<SimVector> nanoParticleOrigin;
     };
 
+    struct UnitBehaviorStateRepairing
+    {
+        UnitId targetUnit;
+        std::optional<SimVector> nanoParticleOrigin;
+
+        /**
+         * Virtual build-progress axis for this repair, in build-time ticks.
+         * Anchored to the target's hit points when the state is entered and
+         * re-anchored if the target takes damage while being repaired.
+         */
+        unsigned int repairProgress;
+    };
+
     using UnitBehaviorState = std::variant<
         UnitBehaviorStateIdle,
         UnitBehaviorStateCreatingUnit,
-        UnitBehaviorStateBuilding>;
+        UnitBehaviorStateBuilding,
+        UnitBehaviorStateRepairing>;
 
     struct NavigationStateIdle
     {
@@ -299,6 +313,27 @@ namespace rwe
         BuildCostInfo getBuildCostInfo(const UnitDefinition& unitDefinition, unsigned int buildTimeContribution);
 
         bool addBuildProgress(const UnitDefinition& unitDefinition, unsigned int buildTimeContribution);
+
+        /**
+         * The virtual build-progress axis value (in build-time ticks)
+         * corresponding to the unit's current hit points.
+         */
+        unsigned int getRepairProgressForHitPoints(const UnitDefinition& unitDefinition) const;
+
+        /**
+         * The resource cost of advancing a repair progress axis
+         * by up to `buildTimeContribution` ticks from `repairProgress`.
+         */
+        BuildCostInfo getRepairCostInfo(const UnitDefinition& unitDefinition, unsigned int repairProgress, unsigned int buildTimeContribution) const;
+
+        /**
+         * Advances hit-point repair by up to `buildTimeContribution` ticks
+         * along the caller-owned `repairProgress` axis.
+         * If the unit took damage since the last repair tick, the axis is
+         * first re-anchored to current hit points so lost health is paid for again.
+         * Returns true when hit points reach the maximum.
+         */
+        bool addRepairProgress(const UnitDefinition& unitDefinition, unsigned int& repairProgress, unsigned int buildTimeContribution);
 
         void moveObject(const std::string& pieceName, SimAxis axis, SimScalar targetPosition, SimScalar speed);
 

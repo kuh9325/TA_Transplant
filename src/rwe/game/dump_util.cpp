@@ -145,6 +145,13 @@ namespace rwe
     {
         return nlohmann::json();
     }
+    nlohmann::json dumpJson(const UnitBehaviorStateRepairing& s)
+    {
+        return nlohmann::json{
+            {"targetUnit", dumpJson(s.targetUnit)},
+            {"repairProgress", dumpJson(s.repairProgress)},
+        };
+    }
     nlohmann::json dumpJson(const UnitBehaviorStateCreatingUnit& s)
     {
         return nlohmann::json{

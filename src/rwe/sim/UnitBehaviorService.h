@@ -55,6 +55,9 @@ namespace rwe
         /** Returns true if the order has been completed. */
         bool handleCompleteBuildOrder(UnitInfo unitInfo, const CompleteBuildOrder& buildOrder);
 
+        /** Returns true if the order has been completed. */
+        bool handleRepairOrder(UnitInfo unitInfo, const RepairOrder& repairOrder);
+
         bool handleGuardOrder(UnitInfo unitInfo, const GuardOrder& guardOrder);
 
         bool handleBuild(UnitInfo unitInfo, const std::string& unitType);
@@ -122,9 +125,22 @@ namespace rwe
 
         bool buildExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
 
+        /**
+         * True when the target's footprint perimeter is within the builder's
+         * buildDistance. TA working range is measured to the target's edge,
+         * not its center -- a short-range builder must be able to service a
+         * large-footprint target it can only approach as far as the perimeter.
+         */
+        bool inWorkingRange(UnitInfo unitInfo, const UnitState& targetUnit, const UnitDefinition& targetUnitDefinition);
+
+        /** Returns true if the repair order has been completed or abandoned. */
+        bool repairExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
+
         void changeState(UnitState& unit, const UnitBehaviorState& newState);
 
         bool deployBuildArm(UnitInfo unitInfo, UnitId targetUnitId);
+
+        bool deployRepairArm(UnitInfo unitInfo, UnitId targetUnitId);
 
         bool climbToCruiseAltitude(UnitInfo unitInfo);
 
