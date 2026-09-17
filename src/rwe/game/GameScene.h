@@ -224,11 +224,6 @@ namespace rwe
         bool up{false};
         bool down{false};
 
-        bool leftCtrlDown{false};
-        bool rightCtrlDown{false};
-        bool leftShiftDown{false};
-        bool rightShiftDown{false};
-
         struct CameraControlStateFree
         {
         };

@@ -1,4 +1,5 @@
 #include "GameScene.h"
+#include <SDL3/SDL_keyboard.h>
 #include <algorithm>
 #include <fstream>
 #include <functional>
@@ -1218,22 +1219,6 @@ namespace rwe
         {
             right = true;
         }
-        else if (keysym.key == SDLK_LCTRL)
-        {
-            leftCtrlDown = true;
-        }
-        else if (keysym.key == SDLK_RCTRL)
-        {
-            rightCtrlDown = true;
-        }
-        else if (keysym.key == SDLK_LSHIFT)
-        {
-            leftShiftDown = true;
-        }
-        else if (keysym.key == SDLK_RSHIFT)
-        {
-            rightShiftDown = true;
-        }
         else if (keysym.key == SDLK_ESCAPE)
         {
             handleEscapeDown();
@@ -1300,22 +1285,6 @@ namespace rwe
         else if (keysym.key == SDLK_RIGHT)
         {
             right = false;
-        }
-        else if (keysym.key == SDLK_LCTRL)
-        {
-            leftCtrlDown = false;
-        }
-        else if (keysym.key == SDLK_RCTRL)
-        {
-            rightCtrlDown = false;
-        }
-        else if (keysym.key == SDLK_LSHIFT)
-        {
-            leftShiftDown = false;
-        }
-        else if (keysym.key == SDLK_RSHIFT)
-        {
-            rightShiftDown = false;
         }
     }
 
@@ -2706,12 +2675,12 @@ namespace rwe
 
     bool GameScene::isCtrlDown() const
     {
-        return leftCtrlDown || rightCtrlDown;
+        return (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
     }
 
     bool GameScene::isShiftDown() const
     {
-        return leftShiftDown || rightShiftDown;
+        return (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
     }
 
     void GameScene::handleEscapeDown()

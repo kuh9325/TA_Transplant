@@ -160,13 +160,26 @@ namespace rwe
             graphics->clear();
             currentScene->render();
 
-            if (!imGuiContext->io->WantCaptureMouse)
+            // Cursor ownership transition. When ImGui wants the mouse
+            // the native pointer must be visible over ImGui windows;
+            // otherwise we hide it and render the game cursor ourselves.
+            if (imGuiContext->io->WantCaptureMouse)
+            {
+                sdl->showCursor();
+            }
+            else
             {
                 sdl->hideCursor();
-                cursorService->render(uiRenderService);
             }
 
+            // ImGui draws before the custom cursor so the game cursor
+            // stays on top of scene/UI elements.
             imGuiContext->renderDrawData();
+
+            if (!imGuiContext->io->WantCaptureMouse)
+            {
+                cursorService->render(uiRenderService);
+            }
 
             sdl->glSwapWindow(window);
 
