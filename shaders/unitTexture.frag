@@ -8,6 +8,9 @@ out vec4 outColor;
 uniform sampler2D textureSampler;
 uniform float seaLevel;
 uniform bool shade;
+// translucency for the owner's cloaked units (retail draws them
+// through a ghost/dimmed blit variant); 1 = opaque
+uniform float alpha;
 
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
@@ -25,5 +28,5 @@ void main(void)
     float lightIntensity = shade
         ? 1.5 * clamp(dot(worldNormal, lightDirection), 0.0, 1.0) + 0.5
         : 1.0;
-    outColor = vec4(vec3(baseColor) * lightIntensity * (height > seaLevel ? normalTint : waterTint), 1.0);
+    outColor = vec4(vec3(baseColor) * lightIntensity * (height > seaLevel ? normalTint : waterTint), alpha);
 }

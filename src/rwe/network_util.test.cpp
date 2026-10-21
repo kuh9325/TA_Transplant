@@ -2,6 +2,8 @@
 #include <rapidcheck.h>
 #include <rapidcheck/catch.h>
 #include <rwe/network_util.h>
+#include <limits>
+#include <vector>
 
 namespace rwe
 {
@@ -44,4 +46,28 @@ namespace rwe
             REQUIRE(computeCrc("a", 1) == 0xE8B7BE43u);
         }
     }
+    TEST_CASE("peer scene extrapolation follows the simulation tick period", "[followup][timing]")
+    {
+        const Timestamp now{};
+        std::vector<std::pair<SceneTime, Timestamp>> peers{
+            {SceneTime(100), now - std::chrono::milliseconds(1000)}};
+        REQUIRE(estimateAverageSceneTimeStatic(SceneTime(130), peers, now) == 130);
+        peers.front().second = now - std::chrono::milliseconds(33);
+        REQUIRE(estimateAverageSceneTimeStatic(SceneTime(100), peers, now) == 100);
+        peers.front().second = now - std::chrono::milliseconds(34);
+        REQUIRE(estimateAverageSceneTimeStatic(SceneTime(101), peers, now) == 101);
+    }
+
+    TEST_CASE("peer scene averaging handles empty future and long-running samples", "[followup][timing]")
+    {
+        const Timestamp now{};
+        std::vector<std::pair<SceneTime, Timestamp>> peers;
+        REQUIRE(estimateAverageSceneTimeStatic(SceneTime(77), peers, now) == 77);
+        peers.emplace_back(SceneTime(77), now + std::chrono::milliseconds(100));
+        REQUIRE(estimateAverageSceneTimeStatic(SceneTime(77), peers, now) == 77);
+        const auto late = std::numeric_limits<unsigned int>::max() - 100;
+        peers = {{SceneTime(late), now}, {SceneTime(late), now}};
+        REQUIRE(estimateAverageSceneTimeStatic(SceneTime(late), peers, now) == late);
+    }
+
 }

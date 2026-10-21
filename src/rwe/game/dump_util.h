@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <nlohmann/json.hpp>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/util/OpaqueId.h>
@@ -53,6 +54,10 @@ namespace rwe
 
     nlohmann::json dumpJson(const UnitBehaviorStateRepairing&);
 
+    nlohmann::json dumpJson(const UnitBehaviorStateReclaiming&);
+
+    nlohmann::json dumpJson(const MapFeature& f);
+
     nlohmann::json dumpJson(const UnitBehaviorStateCreatingUnit&);
 
     nlohmann::json dumpJson(const UnitCreationStatusPending&);
@@ -71,6 +76,35 @@ namespace rwe
 
     nlohmann::json dumpJson(const DiscreteRect& r);
 
+    nlohmann::json dumpJson(const MoveOrder& o);
+    nlohmann::json dumpJson(const AttackOrder& o);
+    nlohmann::json dumpJson(const BuildOrder& o);
+    nlohmann::json dumpJson(const BuggerOffOrder& o);
+    nlohmann::json dumpJson(const CompleteBuildOrder& o);
+    nlohmann::json dumpJson(const GuardOrder& o);
+    nlohmann::json dumpJson(const RepairOrder& o);
+    nlohmann::json dumpJson(const ReclaimOrder& o);
+    nlohmann::json dumpJson(const PatrolOrder& o);
+    nlohmann::json dumpJson(const WaitOrder& o);
+    nlohmann::json dumpJson(const WaitForAttackOrder& o);
+    nlohmann::json dumpJson(const MakeSelectableOrder& o);
+    nlohmann::json dumpJson(const AttackUnitTypeOrder& o);
+    nlohmann::json dumpJson(const MissionBuildOrder& o);
+    nlohmann::json dumpJson(const MissionFactoryBuildOrder& o);
+
+    nlohmann::json dumpJson(const SelfDestructOrder& o);
+    nlohmann::json dumpJson(const UnloadOrder& o);
+
+    nlohmann::json dumpJson(const LoadOrder& o);
+    nlohmann::json dumpJson(const LandOrder& o);
+    nlohmann::json dumpJson(const ParalyzeOrder& o);
+    nlohmann::json dumpJson(const BuildWeaponOrder& o);
+    nlohmann::json dumpJson(const CommandFireOrder& o);
+
+    nlohmann::json dumpJson(const UnitWeapon& w);
+
+    nlohmann::json dumpJson(const MissionUnitState& s);
+
     nlohmann::json dumpJson(const GameSimulation& simulation);
 
     template <typename T, typename Tag>
@@ -87,6 +121,28 @@ namespace rwe
 
     template <typename T>
     nlohmann::json dumpJson(const std::vector<T>& v)
+    {
+        nlohmann::json j;
+        for (const auto& e : v)
+        {
+            j.push_back(dumpJson(e));
+        }
+        return j;
+    }
+
+    template <typename T, std::size_t N>
+    nlohmann::json dumpJson(const std::array<T, N>& v)
+    {
+        nlohmann::json j;
+        for (const auto& e : v)
+        {
+            j.push_back(dumpJson(e));
+        }
+        return j;
+    }
+
+    template <typename T>
+    nlohmann::json dumpJson(const std::deque<T>& v)
     {
         nlohmann::json j;
         for (const auto& e : v)

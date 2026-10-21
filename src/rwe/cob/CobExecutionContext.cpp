@@ -292,11 +292,19 @@ namespace rwe
                     disableCaching();
                     break;
                 case OpCode::ATTACH_UNIT:
-                    attachUnit();
-                    break;
+                {
+                    // attach-unit pops (arg, slot, unit) -- the
+                    // script pushes them in declaration order
+                    auto arg = pop();
+                    auto slot = pop();
+                    auto unit = pop();
+                    return CobEnvironment::AttachUnitStatus{CobUnitId(unit), slot, arg};
+                }
                 case OpCode::DROP_UNIT:
-                    detachUnit();
-                    break;
+                {
+                    auto unit = pop();
+                    return CobEnvironment::DetachUnitStatus{CobUnitId(unit)};
+                }
 
                 case OpCode::WAIT_FOR_MOVE:
                 {
@@ -556,19 +564,6 @@ namespace rwe
         // do nothing, RWE does not have the concept of caching
     }
 
-    void CobExecutionContext::attachUnit()
-    {
-        /*auto piece = */ pop();
-        /*auto unit = */ pop();
-        // TODO: this
-    }
-
-    void CobExecutionContext::detachUnit()
-    {
-        /*auto unit = */ pop();
-        // TODO: this
-    }
-
     void CobExecutionContext::returnFromScript()
     {
         thread->returnValue = pop();
@@ -581,11 +576,13 @@ namespace rwe
         auto functionId = nextInstruction();
         auto paramCount = nextInstruction();
 
-        // collect up the parameters
+        // collect up the parameters.
+        // The caller pushes arguments in declaration order,
+        // so the top of the stack holds the last parameter.
         std::vector<int> params(paramCount);
-        for (unsigned int i = 0; i < paramCount; ++i)
+        for (unsigned int i = paramCount; i > 0; --i)
         {
-            params[i] = pop();
+            params[i - 1] = pop();
         }
 
         const auto& functionInfo = env->script()->functions.at(functionId);
@@ -597,10 +594,12 @@ namespace rwe
         auto functionId = nextInstruction();
         auto paramCount = nextInstruction();
 
+        // parameters are passed the same way as call-script:
+        // declaration order pushed left-to-right, last one on top.
         std::vector<int> params(paramCount);
-        for (unsigned int i = 0; i < paramCount; ++i)
+        for (unsigned int i = paramCount; i > 0; --i)
         {
-            params[i] = pop();
+            params[i - 1] = pop();
         }
 
         env->createThread(functionId, params, thread->signalMask);

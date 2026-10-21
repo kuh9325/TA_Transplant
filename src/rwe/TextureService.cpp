@@ -192,16 +192,27 @@ namespace rwe
 
     TextureService::TextureInfo TextureService::getBitmapInternal(const std::string& bitmapName)
     {
-        auto it = bitmapCache.find(bitmapName);
+        auto info = getBitmapInternalAtPath("bitmaps/" + bitmapName + ".pcx");
+        if (!info)
+        {
+            throw std::runtime_error("bitmap not found");
+        }
+
+        return *info;
+    }
+
+    std::optional<TextureService::TextureInfo> TextureService::getBitmapInternalAtPath(const std::string& vfsPath)
+    {
+        auto it = bitmapCache.find(vfsPath);
         if (it != bitmapCache.end())
         {
             return it->second;
         }
 
-        auto entry = fileSystem->readFile("bitmaps/" + bitmapName + ".pcx");
+        auto entry = fileSystem->readFile(vfsPath);
         if (!entry)
         {
-            throw std::runtime_error("bitmap not found");
+            return std::nullopt;
         }
 
         PcxDecoder<std::vector<char>::const_iterator> decoder(entry->begin(), entry->end());
@@ -222,8 +233,21 @@ namespace rwe
 
         SharedTextureHandle handle(graphics->createTexture(width, height, buffer));
         TextureInfo info(width, height, handle);
-        bitmapCache[bitmapName] = info;
+        bitmapCache[vfsPath] = info;
         return info;
+    }
+
+    std::optional<std::shared_ptr<Sprite>> TextureService::tryGetPcxSprite(const std::string& vfsPath)
+    {
+        auto info = getBitmapInternalAtPath(vfsPath);
+        if (!info)
+        {
+            return std::nullopt;
+        }
+
+        auto region = Rectangle2f::fromTopLeft(0.0f, 0.0f, 1.0f, 1.0f);
+        auto bounds = Rectangle2f::fromTopLeft(0.0f, 0.0f, static_cast<float>(info->width), static_cast<float>(info->height));
+        return std::make_shared<Sprite>(graphics->createSprite(bounds, region, info->handle));
     }
 
     std::shared_ptr<Sprite> TextureService::getMinimap(const std::string& mapName)

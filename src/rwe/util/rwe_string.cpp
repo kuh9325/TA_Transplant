@@ -66,6 +66,13 @@ namespace rwe
         return copy;
     }
 
+    std::string toLower(const std::string& str)
+    {
+        std::string copy(str);
+        std::transform(copy.begin(), copy.end(), copy.begin(), [](unsigned char c) { return std::tolower(c); });
+        return copy;
+    }
+
     // Note: unchecked iterators should only be used on input that would pass utf8::is_valid check
     ConstUtf8UncheckedIterator cUtf8UncheckedBegin(const std::string& str)
     {

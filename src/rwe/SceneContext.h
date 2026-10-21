@@ -1,6 +1,7 @@
 #pragma once
 
 #include <rwe/AudioService.h>
+#include <rwe/CampaignProgress.h>
 #include <rwe/CursorService.h>
 #include <rwe/GlobalConfig.h>
 #include <rwe/PathMapping.h>
@@ -31,7 +32,15 @@ namespace rwe
         const std::unordered_map<std::string, SideData>* const sideData;
         TimeService* const timeService;
         const PathMapping* const pathMapping;
-        const GlobalConfig* const globalConfig;
+        GlobalConfig* const globalConfig;
+
+        /**
+         * Session-scoped campaign W/L/U state, shared by the campaign
+         * frontend, the mission scene and the ENDMSN debrief.
+         * Retail keeps the equivalent array in the frontend context;
+         * persistence is Save/Load (C6), out of scope here.
+         */
+        CampaignProgress* const campaignProgress;
 
         SceneContext(
             SdlContext* const sdl,
@@ -48,7 +57,8 @@ namespace rwe
             const std::unordered_map<std::string, SideData>* const sideData,
             TimeService* const timeService,
             const PathMapping* const pathMapping,
-            const GlobalConfig* const globalConfig)
+            GlobalConfig* const globalConfig,
+            CampaignProgress* const campaignProgress)
             : sdl(sdl),
               viewport(viewportService),
               graphics(graphics),
@@ -63,7 +73,8 @@ namespace rwe
               sideData(sideData),
               timeService(timeService),
               pathMapping(pathMapping),
-              globalConfig(globalConfig)
+              globalConfig(globalConfig),
+              campaignProgress(campaignProgress)
         {
         }
     };

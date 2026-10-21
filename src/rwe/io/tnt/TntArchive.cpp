@@ -77,17 +77,50 @@ namespace rwe
         unsigned int height;
     };
 
+    bool isMinimapPadByte(char c)
+    {
+        // stock minimaps pad the unused canvas with 0x64, but some
+        // (e.g. AC01, AC05) pad with 0x00 instead
+        return c == TntMinimapVoidByte || c == 0x00;
+    }
+
     MinimapSize getMinimapActualSize(const std::vector<char>& data, unsigned int width, unsigned int height)
     {
+        // TNT minimaps are stored in a fixed-size canvas: the authored
+        // image is anchored top-left and the remainder is a uniform pad
+        // run. Trim trailing columns/rows that are entirely pad bytes;
+        // a line only counts as padding when every pixel in it is a pad
+        // byte, so real edge content is never clipped.
+        auto isPadColumn = [&](unsigned int x) {
+            for (unsigned int y = 0; y < height; ++y)
+            {
+                if (!isMinimapPadByte(data[y * width + x]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+        auto isPadRow = [&](unsigned int y) {
+            for (unsigned int x = 0; x < width; ++x)
+            {
+                if (!isMinimapPadByte(data[y * width + x]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+
         unsigned int realWidth = width;
         unsigned int realHeight = height;
 
-        while (realWidth > 0 && data[realWidth - 1] == TntMinimapVoidByte)
+        while (realWidth > 0 && isPadColumn(realWidth - 1))
         {
             --realWidth;
         }
 
-        while (realHeight > 0 && data[((realHeight - 1) * width)] == TntMinimapVoidByte)
+        while (realHeight > 0 && isPadRow(realHeight - 1))
         {
             --realHeight;
         }

@@ -37,7 +37,7 @@ namespace rwe
         gameTimeBuffers.at(player).push_back(gameHash);
     }
 
-    void PlayerCommandService::registerPlayer(PlayerId playerId)
+    void PlayerCommandService::registerPlayer(PlayerId playerId, bool participatesInHashCheck)
     {
         std::scoped_lock<std::mutex> lock(mutex);
 
@@ -47,7 +47,10 @@ namespace rwe
             throw std::logic_error("Player already registered");
         }
 
-        gameTimeBuffers.emplace(playerId, std::deque<GameHash>());
+        if (participatesInHashCheck)
+        {
+            gameTimeBuffers.emplace(playerId, std::deque<GameHash>());
+        }
     }
 
     unsigned int PlayerCommandService::bufferedCommandCount(PlayerId player) const
@@ -57,9 +60,23 @@ namespace rwe
         return commandBuffers.at(player).size();
     }
 
+    unsigned int PlayerCommandService::bufferedHashCount(PlayerId player) const
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+
+        return gameTimeBuffers.at(player).size();
+    }
+
     bool PlayerCommandService::checkHashes()
     {
         std::scoped_lock<std::mutex> lock(mutex);
+
+        // With no hash participants, the all-queues-ready condition is
+        // vacuously true and would otherwise loop forever.
+        if (gameTimeBuffers.empty())
+        {
+            return true;
+        }
 
         while (!std::any_of(gameTimeBuffers.begin(), gameTimeBuffers.end(), [](const auto& p) { return p.second.empty(); }))
         {

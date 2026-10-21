@@ -15,7 +15,10 @@ namespace rwe
             auto pieceIndexIt = modelDefinition.pieceIndicesByName.find(toUpper(*parentPiece));
             if (pieceIndexIt == modelDefinition.pieceIndicesByName.end())
             {
-                throw std::runtime_error("missing piece definition: " + *parentPiece);
+                // stock scripts reference pieces the model doesn't have
+                // (e.g. flare1); retail ignores them, so resolve to the
+                // unit's origin rather than crashing
+                break;
             }
 
             const auto& pieceDef = modelDefinition.pieces.at(pieceIndexIt->second);

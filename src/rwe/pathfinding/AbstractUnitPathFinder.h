@@ -34,7 +34,7 @@ namespace rwe
             unsigned int footprintZ);
 
     protected:
-        std::vector<VertexInfo> getSuccessors(const VertexInfo& vertex) override;
+        void getSuccessors(const VertexInfo& vertex, std::vector<VertexInfo>& out) override;
 
     private:
         bool isWalkable(const Point& p) const;
@@ -45,6 +45,8 @@ namespace rwe
 
         Point step(const Point& p, Direction d) const;
 
-        std::vector<Point> getNeighbours(const Point& p);
+        void getNeighbours(const Point& p, std::vector<Point>& out);
+
+        std::vector<Point> neighbourBuffer;
     };
 }

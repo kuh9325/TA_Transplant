@@ -1,0 +1,1693 @@
+{
+  "notice": "Recorded source-snapshot attribution, not replacement Git history or proof of rights. No author emails or private commit messages included.",
+  "baseline": "d79fa8e2480586631b003de9758d814d3e9137e6",
+  "files": [
+    {
+      "path": "CMakeLists.txt",
+      "baseline_blob": "2ccc354ae65355dbc5204ab61b612cb4978302ff",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "README.md",
+      "baseline_blob": "f8f7387ff268453e8a4af75bfdf1c3d310e9e034",
+      "recorded_last_change": "3aac994769a6b46cfa2fa3a6de3c8288276d03f8",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-09"
+    },
+    {
+      "path": "packaging/macos/Icon.cmake",
+      "baseline_blob": "c64a1f7b8c7056a4b22497ebbfb49c3eed0e0164",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "packaging/macos/Info.plist.in",
+      "baseline_blob": "3e6f2d3f617b6b1f225741f741c69a3d35cc525e",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "proto/network.proto",
+      "baseline_blob": "def60654cdc4afce2af0662248019a2f4d217bbb",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "scripts/export_cloud_source.py",
+      "baseline_blob": "2128b45c387d02a98ecf02639707b21598004d81",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "scripts/macos_bundle.py",
+      "baseline_blob": "b44dfa2aad93cec57877b510e15347dffdacb206",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "scripts/macos_icon.py",
+      "baseline_blob": "605f36d27b9fd63fde24afcf9fccfa745fff001d",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "scripts/phase8c/allocations.inc",
+      "baseline_blob": "83b26924e9dec64ff7c48e7331c48463ffb49978",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "scripts/phase8c/build_observer.py",
+      "baseline_blob": "3fc80cc421f87695f347cd9781460da99a196239",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "scripts/phase8c/hash_diagnostics.inc",
+      "baseline_blob": "b5353a50caa104267232f013d161d03c69bee769",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "scripts/phase8c/run_benchmarks.py",
+      "baseline_blob": "d3f857a0da82fcbfebef874ac540a4df3c3bcf15",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "scripts/run_followup_regressions.py",
+      "baseline_blob": "eeec6012af2ab4629a0b352de4e8b5008f8ea2de",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "scripts/run_mission_completion_audit.py",
+      "baseline_blob": "98dce35ad12d54c043a5296d186fd625b62c4ecb",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "scripts/run_mission_followup.py",
+      "baseline_blob": "7d9792b839b12c13489dbe1f635502952afa00b8",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "scripts/summarize_mission_completion_audit.py",
+      "baseline_blob": "ae7e1adfe75673d6d165eefe5927b639bac35ead",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "shaders/unitBuildInstanced.frag",
+      "baseline_blob": "484e0a90c8ccce2e8fd796aa5d17a6c5fe748a3f",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "shaders/unitBuildInstanced.vert",
+      "baseline_blob": "3dc518964f88541093c4639969cd11bd51a1b716",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "shaders/unitShadowInstanced.frag",
+      "baseline_blob": "fded32812d9182856873746afb3cc9965013819a",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "shaders/unitShadowInstanced.vert",
+      "baseline_blob": "1608072e1758f797560741995b13b12358129512",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "shaders/unitTexture.frag",
+      "baseline_blob": "72bce9ef5ca947092913059338da5f4e60e78031",
+      "recorded_last_change": "7b1698ba921d34833f2e027c096a82c230c3be2e",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-24"
+    },
+    {
+      "path": "shaders/unitTextureInstanced.frag",
+      "baseline_blob": "8f857e243a8d7e09ba5ef691fd7d02e1618f2778",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "shaders/unitTextureInstanced.vert",
+      "baseline_blob": "65dd80496b9d6d32270e2e254adf041a62a0891a",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/main.cpp",
+      "baseline_blob": "4d9610b45959e9be1bb8c7ffb81f7328db0b2cb0",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/AudioService.cpp",
+      "baseline_blob": "1fd7c7149afbd94384ffc684e7a5e0b552c15f7f",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/AudioService.h",
+      "baseline_blob": "c739aa377d4e48d441935852b370a63b59ae25f4",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/CampaignClosure.test.cpp",
+      "baseline_blob": "81ade2e511664de138d70216a5b6f8fb1d68ebc9",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/CampaignProgress.cpp",
+      "baseline_blob": "76e56ecb974e1c1e71075c816fbcc9b9e2959037",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/CampaignProgress.h",
+      "baseline_blob": "3608a11b9f9cd893ad919e17dc7ede4d3be55cc2",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/CampaignProgress.test.cpp",
+      "baseline_blob": "a69c44bd1291ca6e9844f08aea4ce0537e9b2cfe",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/CursorService.h",
+      "baseline_blob": "4d0894cd6f4d2ddafd6d2b1122e1533f42f85798",
+      "recorded_last_change": "0a17a8e59a9354587c3f5fd7701cd68ca68f716c",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-24"
+    },
+    {
+      "path": "src/rwe/EndMissionScene.cpp",
+      "baseline_blob": "b31e0b9639408c46d5ffc37d3dd5650104fd0766",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/EndMissionScene.h",
+      "baseline_blob": "67dfb65553f7c700a01ca5444d6cb6c943d79d22",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/EndMissionScene_util.cpp",
+      "baseline_blob": "8c2ec1e2ab976380e7c8f3d4984164b4ff8c626e",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/EndMissionScene_util.h",
+      "baseline_blob": "9a8c29f59401d468987726d806563c61f7564d57",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/EndMissionScene_util.test.cpp",
+      "baseline_blob": "64902d4d6e6548a668722f3df0960ba49726d039",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/GameParameters.h",
+      "baseline_blob": "fcd256b79bcb17ffdb4ed97f39175d6047ac98fe",
+      "recorded_last_change": "af0688cb7dfe11b192c241795dd399ea392ddf34",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/GlobalConfig.h",
+      "baseline_blob": "e12b5a08371548defe5700bc7e67c96ce149184b",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/LoadingScene.cpp",
+      "baseline_blob": "7aaf6f421dbb1c397267176abbe8052434137a7a",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/LoadingScene.h",
+      "baseline_blob": "e5d8a966a485bda7ffde2984e89569611ef86a89",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/LoadingScene_util.cpp",
+      "baseline_blob": "bf0171bf7c40b50f365272150d45ac8496b3b6bb",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/LoadingScene_util.h",
+      "baseline_blob": "10c6e65fc5364c107dcbc530c25c3607d1fa180e",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/LoadingScene_util.test.cpp",
+      "baseline_blob": "52ee674321c80555c27dbf8e88ab40fd2a96af5c",
+      "recorded_last_change": "517f67855e55a35f1a6db2b45a3b46a5a8587500",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/MainMenuModel.h",
+      "baseline_blob": "e80185460dc231e8215c0aad974112683b015f1f",
+      "recorded_last_change": "af0688cb7dfe11b192c241795dd399ea392ddf34",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/MainMenuScene.cpp",
+      "baseline_blob": "b3a3a9078d55d6567e2e00ffbfe9257ca16d4447",
+      "recorded_last_change": "af0688cb7dfe11b192c241795dd399ea392ddf34",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/MainMenuScene.h",
+      "baseline_blob": "2ec027fe3e59c11ffbf4970249c414a6ca8914dd",
+      "recorded_last_change": "af0688cb7dfe11b192c241795dd399ea392ddf34",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/MissionCompletionAudit.inc",
+      "baseline_blob": "8e9cce0e8f90582df494c0968fd9141ae429d34f",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/MissionCompletionFollowup.inc",
+      "baseline_blob": "428fd22d74168186294b56423bd455bb513e87e3",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/MissionCompletionPhase7C.inc",
+      "baseline_blob": "f2b0d2777160badf8cd5858a9c7d706352a418d3",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/RecoverySaveRegression.inc",
+      "baseline_blob": "52098eac6d064bcee67dd573d62e35a4c0e8a85e",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/RenderService.cpp",
+      "baseline_blob": "49a02079a893d8610ca8736d9387ecdca72218b4",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/RenderService.h",
+      "baseline_blob": "0aa7cf6264c225527a7c2bb66742b98c6392eb1f",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/RenderService.test.cpp",
+      "baseline_blob": "c3d6ba63796fd11b785f699ebca283b282bb51e6",
+      "recorded_last_change": "9faec16bf0b272654da9289bd39c09dc1c42bf5e",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-22"
+    },
+    {
+      "path": "src/rwe/SceneContext.h",
+      "baseline_blob": "83ca149e255d6c8cc04668f4e5202e381c896029",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/ShaderService.cpp",
+      "baseline_blob": "24514211f55de3b3dae8f60c039be6725fc31a98",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/ShaderService.h",
+      "baseline_blob": "7bbcccde4f694e24f0156215fe9b5a1d33147dc9",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/SkirmishClosure.test.cpp",
+      "baseline_blob": "58f97817b036d8ebd77045c151f4a29ca59be412",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/SkirmishSettings.cpp",
+      "baseline_blob": "7ab371f7039486fbaf9eafc4bb98637927a015c4",
+      "recorded_last_change": "af0688cb7dfe11b192c241795dd399ea392ddf34",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/SkirmishSettings.h",
+      "baseline_blob": "28b28c1e773d698a394b60e6cbb69b07ab4d1705",
+      "recorded_last_change": "af0688cb7dfe11b192c241795dd399ea392ddf34",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/TextureService.cpp",
+      "baseline_blob": "26ea87470688a8354bad35c6ee716e648b0e6f87",
+      "recorded_last_change": "fcdea06b94c29561fb48e6279dc213a81bdea9e0",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/TextureService.h",
+      "baseline_blob": "c1d4ccfbd90b0820fc79f87be8f739452340d96a",
+      "recorded_last_change": "fcdea06b94c29561fb48e6279dc213a81bdea9e0",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/UiRenderService.cpp",
+      "baseline_blob": "f667e8b978f55d5b97e30604611767e9822f8d76",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/UiRenderService.h",
+      "baseline_blob": "0f9597c8c990935e733ef77b1940d96c7c794c7c",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/Viewport.test.cpp",
+      "baseline_blob": "4a5215dcf8e2eae29f03b15cd994b4afe63e5f20",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/cob/CobEnvironment.cpp",
+      "baseline_blob": "cd48294f18ebea104ae8e3bf49e962a935404384",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/cob/CobEnvironment.h",
+      "baseline_blob": "d0ae50e91c8a63501c912eb13edc7f802278d4e2",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/cob/CobExecutionContext.cpp",
+      "baseline_blob": "6bd22d9e9063ccbe868199dd566fc2a3f8197775",
+      "recorded_last_change": "012bbf428b594eef7f073c3c0be2f83b447a7778",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/cob/CobExecutionContext.h",
+      "baseline_blob": "4cdb18a87f939238b0136e4f8da40c04b906c328",
+      "recorded_last_change": "0a17a8e59a9354587c3f5fd7701cd68ca68f716c",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-24"
+    },
+    {
+      "path": "src/rwe/cob/CobThread.h",
+      "baseline_blob": "62e1ca19e34c7230d1fbbb31b1d178228bbeb237",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/collections/VectorMap.h",
+      "baseline_blob": "7ca164d1b5fc6a17cdce6f7b0b834d2e26c347e3",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/game/FeatureMediaInfo.h",
+      "baseline_blob": "268cbf279d24e06398368e8ebaa8e05397804ea4",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/GameNetworkService.cpp",
+      "baseline_blob": "4be50754211dc67a3ff4b1a66f5836313d234628",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/GameNetworkService.h",
+      "baseline_blob": "03e6e55769ea8ca6d06e46f6fbf516c88206cac2",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/GameNetworkService.test.cpp",
+      "baseline_blob": "9269a1cfbfbd020f6b1511f13003e4fc5d914614",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/GameScene.cpp",
+      "baseline_blob": "2abe57cc7d20cfbf15c75b49669453a16256b886",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/GameScene.h",
+      "baseline_blob": "29eb2553feea421962ded24e269053f0a3369e84",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/GameScene_util.cpp",
+      "baseline_blob": "b576191a9d68628c50b516c4c18d364a69fb8aac",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/GameScene_util.h",
+      "baseline_blob": "eb1860fc943f569d1c213f3e6a81c832e116e0f1",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/GameScene_util.test.cpp",
+      "baseline_blob": "8fabe1772140fc23bbef4540378a9ad7430146d6",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/Particle.h",
+      "baseline_blob": "9ae9bf0a3a0fa94cabb56afa5f2da0bba3c3e4ab",
+      "recorded_last_change": "58013c7804b885524144b5d6cb1dc010584f4f9b",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-03"
+    },
+    {
+      "path": "src/rwe/game/PlayerColorIndex.h",
+      "baseline_blob": "e0a638a9a92510aed06012a196c460a6b3824eac",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/game/PlayerCommand.h",
+      "baseline_blob": "bc1c637c1ff92b0fcefd1f56859cb16d37fb13f6",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/PlayerCommandService.cpp",
+      "baseline_blob": "e2ceb8c85b7d395aa396f5bf3fa78995b7aea77f",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/PlayerCommandService.h",
+      "baseline_blob": "f35e67daf5df51ecb8e182c6bc756639bca9dd80",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/PlayerCommandService.test.cpp",
+      "baseline_blob": "d7d7d96339e946545ac0fe63779b295a13535638",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/SceneTickScheduler.h",
+      "baseline_blob": "d91cd8023aa2c36ce4d3a50b3975e3e3c2206246",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/SceneTickScheduler.test.cpp",
+      "baseline_blob": "e6e1ca09b7fb4b68db31d20d01ea3b7d95af69ef",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/dump_util.cpp",
+      "baseline_blob": "5c9d11b8dad4e08048963fec72d5f216a53b4371",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/dump_util.h",
+      "baseline_blob": "afed6accb7f515fb93a3f6103c0e73baad9e8bb2",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/matrix_util.cpp",
+      "baseline_blob": "e447f630bcf35f9b52359c70e8eeb1c6273077e5",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/matrix_util.h",
+      "baseline_blob": "576acdaf16305acd3c280a9efa702e53e2531161",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/matrix_util.test.cpp",
+      "baseline_blob": "98aebb3330e31f04d0b108b7f0811d2f11bf6379",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/game/selection_util.h",
+      "baseline_blob": "230b9f5d1bc170770f699e5c29370c0cf71361fe",
+      "recorded_last_change": "ef2f660bc11d37d87c1d3f4d49ad75de7f1493d8",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/game/selection_util.test.cpp",
+      "baseline_blob": "81b92de0ec6d578de01c11ac3984923c11046819",
+      "recorded_last_change": "af0688cb7dfe11b192c241795dd399ea392ddf34",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/grid/StateHashGrid.h",
+      "baseline_blob": "d5fe092716c24bfdb6151a4522b692fa2b516e94",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/io/campaigntdf/CampaignTdf.cpp",
+      "baseline_blob": "8fdebd29be080fc3ffdf7c2ce274700a92d76d79",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/io/campaigntdf/CampaignTdf.h",
+      "baseline_blob": "856565883b98866a83b5a5a10a33625e82571dbc",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/io/campaigntdf/CampaignTdf.test.cpp",
+      "baseline_blob": "8cc28d6adc5b4593cd338ba935973a7dd910bfd8",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/io/fbi/UnitFbi.h",
+      "baseline_blob": "2151e872b08e28d0ea0736820a337f1e38a77180",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/io/fbi/io.cpp",
+      "baseline_blob": "83db7a4970af0f382a69b647acd3d23f23ab81f2",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/io/fbi/io.test.cpp",
+      "baseline_blob": "add0ec41dbff3259c5c1b9e7185ba96c97e063c1",
+      "recorded_last_change": "a89547030fa1ccfddcd16f5e2a223339453139e6",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-24"
+    },
+    {
+      "path": "src/rwe/io/featuretdf/FeatureTdf.h",
+      "baseline_blob": "1c8beab21d87a42ec945f783b5222ae3fdda65fd",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/io/featuretdf/io.cpp",
+      "baseline_blob": "ce5a49327ab2eef7db04b5463f597af82005cd67",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/io/featuretdf/io.test.cpp",
+      "baseline_blob": "a24c8f3567a1b45262e932b2852b1e72779ebdf1",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/io/gui/gui.cpp",
+      "baseline_blob": "16f8f41bb61d2d5b7c2b3712c28b540ee4106ff3",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/io/gui/gui.h",
+      "baseline_blob": "be785daa848d519d7bf424c2bcbf5a9635a1f2fd",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/io/gui/gui.test.cpp",
+      "baseline_blob": "455d6243d8576c97919f16db73aea90a3fd68ca1",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/io/moveinfotdf/io.cpp",
+      "baseline_blob": "848c62bd4064ded10b7df6531028d689c7ceebb4",
+      "recorded_last_change": "fe76b72b7e5de70c1d65b7ea2a48c3268716073d",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-20"
+    },
+    {
+      "path": "src/rwe/io/ota/ota.cpp",
+      "baseline_blob": "2861a29ddaca4584080e83b10c7e6025a0f85180",
+      "recorded_last_change": "62bef85e996acf805363c19b14501cd8e64960d5",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-09"
+    },
+    {
+      "path": "src/rwe/io/ota/ota.h",
+      "baseline_blob": "f952ae56313cbcea43a3b929336c58cfbd1fe055",
+      "recorded_last_change": "62bef85e996acf805363c19b14501cd8e64960d5",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-09"
+    },
+    {
+      "path": "src/rwe/io/ota/ota.test.cpp",
+      "baseline_blob": "b8b9823faaf844babf3caddf90bb42cd721c0f71",
+      "recorded_last_change": "65c9e6c67eaccfc1aa282890c9188e510ab5f720",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/io/tnt/TntArchive.cpp",
+      "baseline_blob": "a6076908cfef273c0be8d09ece641291265a616b",
+      "recorded_last_change": "f2ca82e9e09f213bbdbb17d809a53ba930b57da1",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/io/tnt/TntArchive.test.cpp",
+      "baseline_blob": "37e4d304c3e8c5f485bf5136fdce635a87bd7eec",
+      "recorded_last_change": "f2ca82e9e09f213bbdbb17d809a53ba930b57da1",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/io/weapontdf/WeaponTdf.cpp",
+      "baseline_blob": "f60647265ea74fa22b6e9d5ec0f9061a1594a03f",
+      "recorded_last_change": "47bb99581d13f65888c5e8e6fc3845bf628b8e1b",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-28"
+    },
+    {
+      "path": "src/rwe/io/weapontdf/WeaponTdf.h",
+      "baseline_blob": "d2c9a410f6ab011fdb784bc9b66cdef269732fe8",
+      "recorded_last_change": "47bb99581d13f65888c5e8e6fc3845bf628b8e1b",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-28"
+    },
+    {
+      "path": "src/rwe/mesh_util.test.cpp",
+      "baseline_blob": "8bc4538f7ae7326d2ed79d57eaf0cf4edf563a34",
+      "recorded_last_change": "47bb99581d13f65888c5e8e6fc3845bf628b8e1b",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-28"
+    },
+    {
+      "path": "src/rwe/network_util.h",
+      "baseline_blob": "8371635a511ca1eadb416c48b2a15001024abb29",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/network_util.test.cpp",
+      "baseline_blob": "ea7620abfd1c588e6e95a8c076f9b5607d557220",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/observable/Subject.h",
+      "baseline_blob": "c09e80880d241c68cf80244595fb76e43627f309",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/pathfinding/AStarPathFinder.h",
+      "baseline_blob": "9d5f55fc2e9cca4f0c55467af4076273fffd5f0e",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/pathfinding/AbstractUnitPathFinder.cpp",
+      "baseline_blob": "4398909d4413a0a94eeff6a4cae20f13139db234",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/pathfinding/AbstractUnitPathFinder.h",
+      "baseline_blob": "c57a94aba0f1cc7609d8e86f3137d2f48de68d13",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/pathfinding/PathFindingService.cpp",
+      "baseline_blob": "c2527ff4dad956ed0a41b16bea9eb9f3c4f5ccf5",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/pathfinding/PathFindingService.h",
+      "baseline_blob": "53a90582ab5c384be5e48ad883435ddf35365f57",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/pathfinding/UnitPath.h",
+      "baseline_blob": "aa2159cd519402b027a7c4c74da0b2f792447c75",
+      "recorded_last_change": "45a81644117d033ab09dbc710f5a72a6ec88054d",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-21"
+    },
+    {
+      "path": "src/rwe/proto/serialization.cpp",
+      "baseline_blob": "dc53380f1d03a1d65a69c7e37cb63c7d999d6261",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/proto/serialization.test.cpp",
+      "baseline_blob": "56ee82eaa3c91cb125b31d9bd47226678fd91d31",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/render/GraphicsContext.cpp",
+      "baseline_blob": "08cffdd6bb0bae427c29616380741e192a3d8747",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/render/GraphicsContext.h",
+      "baseline_blob": "b1019aad3dd7218ff6ef0c3d0698238ebc99a70d",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/save/Phase8bSaveHash.inc",
+      "baseline_blob": "4911a74d7bbbfc319b9cf4622e801dfc150bbd6d",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/save/Phase8cHashRegression.inc",
+      "baseline_blob": "4899ad0b4b04af836e89e23e526309a7e90eb0bd",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/save/SaveCodec.cpp",
+      "baseline_blob": "e074a90116bb62d7d3e46054310568f9e624dda2",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/save/SaveCodec.h",
+      "baseline_blob": "8e45ca9a105ebeef2d73f8d92bbfa673f49409b9",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/save/SaveGameService.cpp",
+      "baseline_blob": "6471169c1ac00045d73b0b14aa4c8657593836a4",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/save/SaveGameService.h",
+      "baseline_blob": "2122cd59e4e4fcc063301f02c2a92d19ace46670",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/save/SaveGameService.test.cpp",
+      "baseline_blob": "089ecc35da6b71007288f6e9ef7878bd987da0f8",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/save/SaveListDialog.cpp",
+      "baseline_blob": "46eb20c7a262a3379de845f7303f2953a81a90e8",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/save/SaveListDialog.h",
+      "baseline_blob": "f45deb9c93e2d95e820019637fba8c3d1ff4a90c",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/save/SavedGame.cpp",
+      "baseline_blob": "620a3d9e30da8f845534fe2f1b339c555b318b42",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/save/SavedGame.h",
+      "baseline_blob": "67dcff1ae22688cd8539328d8ea424afa94acfc5",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/save/SavedGame.test.cpp",
+      "baseline_blob": "6a52228c80398ebc0c33cd4b13daeae83dd65029",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/scene/SceneManager.cpp",
+      "baseline_blob": "482688bebe513e1f5e46d115af34b8c71667d163",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/AircraftService.cpp",
+      "baseline_blob": "7d4aff80f01e9538293bc80cf5135226dd8596ae",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/AircraftService.test.cpp",
+      "baseline_blob": "5706750836c40ba23e4b03370ece4c4e8f8008ab",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/Bomber.test.cpp",
+      "baseline_blob": "1535e97fe560d0fc16fd8563532373572e1b649e",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/CampaignAi.cpp",
+      "baseline_blob": "4301998775dcb3d21151968c69fa8f18a7fa2473",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/CampaignAi.h",
+      "baseline_blob": "2e1312109bf7bd71037bd104edd8c680cd4099a1",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/CampaignAi.test.cpp",
+      "baseline_blob": "7e49d7cfe09cc9001ded3912475d5d0eeff1e39b",
+      "recorded_last_change": "517f67855e55a35f1a6db2b45a3b46a5a8587500",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/sim/CampaignAiProfile.cpp",
+      "baseline_blob": "1bf00964ff6018b48b4519a29596df4504827161",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/sim/CampaignAiProfile.h",
+      "baseline_blob": "dda9a97180ba3b67e6e7671768cf90d441635cba",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/sim/CampaignAiProfile.test.cpp",
+      "baseline_blob": "0053b9675eac743e6c0515cc628a5161c7a7c920",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/sim/DestructibleFeatures.test.cpp",
+      "baseline_blob": "cf83a159b0eee91c9a3763eb584af3dc185c577e",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/Emp.test.cpp",
+      "baseline_blob": "3ca873ff4eb7620cb52ae22981dc38782ef4dbd0",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/FeatureDefinition.h",
+      "baseline_blob": "a90d4b31e068a93dcaf12fc77d4cd15491ffe32e",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/FeatureSimulation.cpp",
+      "baseline_blob": "3d265652086a535d76d803f0dd4fddba20996966",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/GameHash_util.cpp",
+      "baseline_blob": "16d3aa7bc1a5d3df763a3cd27cd1938929802f15",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/GameHash_util.h",
+      "baseline_blob": "7259ce977b6fecff37fe63f1a5026d2ea87cc8d1",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/GameHash_util.test.cpp",
+      "baseline_blob": "db41701b7dcf0c8803ea798728fcfcdae63b7e53",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/GameSimulation.cpp",
+      "baseline_blob": "f5eac7218f508ee461bf4ed786c49230065d07c0",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/GameSimulation.h",
+      "baseline_blob": "55c835e3ac12fc593f48c059813700e8e815008c",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/GameSimulation.test.cpp",
+      "baseline_blob": "ce6a3c90b84995de9272749b2d50a5b198c44853",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/Kamikaze.test.cpp",
+      "baseline_blob": "9178619ef85d5b490adb73a7cb3574ea72b7aba3",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/MapFeature.h",
+      "baseline_blob": "b193771e3822c96cf8cee9a50b38ad2253fc2c86",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/MapTerrain.cpp",
+      "baseline_blob": "401e867e2ca5a564db6d78df5023cfe104c6d73f",
+      "recorded_last_change": "8dad35f464436db3668db33c96e646993415c59b",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-20"
+    },
+    {
+      "path": "src/rwe/sim/MapTerrain.test.cpp",
+      "baseline_blob": "df07dc291be59a18dc0f4020dcbf45ed8c58b47c",
+      "recorded_last_change": "8dad35f464436db3668db33c96e646993415c59b",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-20"
+    },
+    {
+      "path": "src/rwe/sim/MeteorShower.cpp",
+      "baseline_blob": "17522037f883399c4bfc92ce3b4db5afc117d52c",
+      "recorded_last_change": "47bb99581d13f65888c5e8e6fc3845bf628b8e1b",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-28"
+    },
+    {
+      "path": "src/rwe/sim/MeteorShower.h",
+      "baseline_blob": "985217b2c9f568ffad330d0f337f61d1dae74c87",
+      "recorded_last_change": "47bb99581d13f65888c5e8e6fc3845bf628b8e1b",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-28"
+    },
+    {
+      "path": "src/rwe/sim/MissionInfo.h",
+      "baseline_blob": "d5b0b3d6f4706769db7d8eefb327057fc9efd1e6",
+      "recorded_last_change": "1e198ab839e5f420c5605cb41d890e5d38ff0a48",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-25"
+    },
+    {
+      "path": "src/rwe/sim/MissionInitialCommand.cpp",
+      "baseline_blob": "bf8be799f875d334f36a0d233df35a57d629c126",
+      "recorded_last_change": "45a81644117d033ab09dbc710f5a72a6ec88054d",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-21"
+    },
+    {
+      "path": "src/rwe/sim/MissionInitialCommand.h",
+      "baseline_blob": "8994f9ff1f51d4e27c34a0249f08c8292e934d67",
+      "recorded_last_change": "45a81644117d033ab09dbc710f5a72a6ec88054d",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-21"
+    },
+    {
+      "path": "src/rwe/sim/MissionInitialCommand.test.cpp",
+      "baseline_blob": "b2e55232f10d18832540cdd73634f0684df86476",
+      "recorded_last_change": "45a81644117d033ab09dbc710f5a72a6ec88054d",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-21"
+    },
+    {
+      "path": "src/rwe/sim/MissionObjectives.cpp",
+      "baseline_blob": "ccd4e14e18b9050ad0e5d31549f2bfbadeab6ced",
+      "recorded_last_change": "58201b23929feb2dcc8b1de83066a637c984160a",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-21"
+    },
+    {
+      "path": "src/rwe/sim/MissionObjectives.h",
+      "baseline_blob": "ee456ee808b43ae9b47a4fb1deb505e703f5f041",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/sim/MissionObjectives.test.cpp",
+      "baseline_blob": "123cdb4340aa9a7dec262cc2adcc2ee950f6e72a",
+      "recorded_last_change": "af0688cb7dfe11b192c241795dd399ea392ddf34",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/sim/OccupiedGrid.h",
+      "baseline_blob": "0489ce184d1877b2fde5657d60a247b568380e78",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/PlayerId.h",
+      "baseline_blob": "867631eb7bbb05a4b9bb5e07ea5e92a60cfa4abe",
+      "recorded_last_change": "47bb99581d13f65888c5e8e6fc3845bf628b8e1b",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-28"
+    },
+    {
+      "path": "src/rwe/sim/Projectile.h",
+      "baseline_blob": "4bb3854734247c4e75c50bcc3467a7b09e739681",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/ProjectilePhysicsType.h",
+      "baseline_blob": "b4568b0dc558118d816a0ab04d9a175af7acb9cc",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/UnitBehaviorService.cpp",
+      "baseline_blob": "e4ca42475851319eac8dc738e17ccfeed39e9dda",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/UnitBehaviorService.h",
+      "baseline_blob": "9946144ba6fabd69518980032bf6f7737741c16e",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/UnitBehaviorService.test.cpp",
+      "baseline_blob": "edd1a6681e7dcf811d5b3df9bb2eebdf4872f69f",
+      "recorded_last_change": "62bef85e996acf805363c19b14501cd8e64960d5",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-09"
+    },
+    {
+      "path": "src/rwe/sim/UnitBehaviorService_util.cpp",
+      "baseline_blob": "949504e1e20ceac001f14f373a8699aee6f61e88",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/UnitBehaviorService_util.h",
+      "baseline_blob": "2cbcd5d0462f4621d85809ee315b5ef9a0c16bb1",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/UnitDefinition.h",
+      "baseline_blob": "bb68cba7214c97bdc6dee97088802a4edc409d28",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/UnitModelDefinition.cpp",
+      "baseline_blob": "58b83ada750d9b571b1e6078cfc8aa66b7811c87",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/UnitModelDefinition.h",
+      "baseline_blob": "1dfb7c8c466356b0fda6f1d6d26965d8101c4b71",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/UnitMoveOrders.h",
+      "baseline_blob": "5b538a435d43872c6a2fc1d1d3a3d0fa6bdd947a",
+      "recorded_last_change": "9b96db05a4a054dc59598ff26fbbe376603d80c5",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/sim/UnitOrder.h",
+      "baseline_blob": "6d8ef224a435e53d6581e3645ace3c0bc2ab4c82",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/UnitState.cpp",
+      "baseline_blob": "7f2d59b018a358a96b31dcb4e93743cd270b9457",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/UnitState.h",
+      "baseline_blob": "14829f2b6cf0a5861938c7b3ff433f665ff35519",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/UnitState.test.cpp",
+      "baseline_blob": "ffc8ac90ba84784f2e473c2d1c21e34025087208",
+      "recorded_last_change": "53d25692a6dd7ef9d3320cc931cc86cca208201c",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-22"
+    },
+    {
+      "path": "src/rwe/sim/UnitState_util.cpp",
+      "baseline_blob": "1610dd887c730a8c1cca6ce355dde543ff7a67bd",
+      "recorded_last_change": "b91560d766a78dd857addff4449c4800d417ddf8",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/sim/UnitState_util.h",
+      "baseline_blob": "aed02108e5f5f9c4cc383f7ce3bd21a6a5128c7f",
+      "recorded_last_change": "b91560d766a78dd857addff4449c4800d417ddf8",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/sim/UnitState_util.test.cpp",
+      "baseline_blob": "8b5e41d5ddb285e36f495b3233520cd739dfb060",
+      "recorded_last_change": "b91560d766a78dd857addff4449c4800d417ddf8",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/sim/UnitWeapon.h",
+      "baseline_blob": "e20c3bd3db5a8af40cdbcda4cecacfab271db2b0",
+      "recorded_last_change": "62bef85e996acf805363c19b14501cd8e64960d5",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-09"
+    },
+    {
+      "path": "src/rwe/sim/Veterancy.h",
+      "baseline_blob": "a009c2aec01b455fb2851053605ceffca255a2ad",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/Veterancy.test.cpp",
+      "baseline_blob": "c834c813ac70a10f8c010775dd5829f1d58fd64b",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/WeaponDefinition.h",
+      "baseline_blob": "9ec40317b4d3b9dc041a294918aa9e3d17a6d8bf",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/cob.cpp",
+      "baseline_blob": "4872955be8ba7fefdb38973828a937be87dff44c",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe/sim/cob.h",
+      "baseline_blob": "23d6510e328828f36eece2c42fdbdc49fe4e58b7",
+      "recorded_last_change": "0a17a8e59a9354587c3f5fd7701cd68ca68f716c",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-24"
+    },
+    {
+      "path": "src/rwe/sim/cob.test.cpp",
+      "baseline_blob": "413cf4c44078dda7600534718aaccd24fdf0cc30",
+      "recorded_last_change": "012bbf428b594eef7f073c3c0be2f83b447a7778",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-01"
+    },
+    {
+      "path": "src/rwe/sim/util.cpp",
+      "baseline_blob": "1727f8dfb7ae21967ff984e85633ff99e2f3a3c6",
+      "recorded_last_change": "7a4cb57b19633e8c54e6f3896ca26a9a58f992a8",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-21"
+    },
+    {
+      "path": "src/rwe/ui/UiComponent.h",
+      "baseline_blob": "b7dbecad147e06514247b50e5406a11877386e5d",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/ui/UiFactory.cpp",
+      "baseline_blob": "65ad6fbb625c08e1e0fc1f1c1682716ccdcb9323",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/ui/UiFactory.h",
+      "baseline_blob": "99e3967eaa6f84f9766ea5a375cccba75262fdc9",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/ui/UiFactory.test.cpp",
+      "baseline_blob": "b2313c015e4041037c3c94365da530df97147324",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/ui/UiLabel.cpp",
+      "baseline_blob": "d8ecc16391db59d8a82f047e125a7528d774325b",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/ui/UiLabel.h",
+      "baseline_blob": "21e781caebcb099a6fe705568c974afec84c5d34",
+      "recorded_last_change": "b3511590209715e320ad7e5f1aeca899713a7954",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-26"
+    },
+    {
+      "path": "src/rwe/ui/UiLightBar.h",
+      "baseline_blob": "3396c22e4215ed6a025b037f601b5d384e69ab3b",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/ui/UiListBox.cpp",
+      "baseline_blob": "e7f6050e0f2139b76f952a37dc87e840f6edcebd",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/ui/UiListBox.h",
+      "baseline_blob": "3831aebd4759def0d0cc0dcbc0f75bfd9be5d678",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/ui/UiListBox.test.cpp",
+      "baseline_blob": "9a09a3e1dca09835458017b844b3eb31f7717cc2",
+      "recorded_last_change": "fcdea06b94c29561fb48e6279dc213a81bdea9e0",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/ui/UiPanel.cpp",
+      "baseline_blob": "3dc71629a7b47fe320cc273db2556146f5a3abfd",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/ui/UiPanel.h",
+      "baseline_blob": "490d8f861fad1983f5e074971f480dd8b9be12ae",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/ui/UiPanel.test.cpp",
+      "baseline_blob": "b7c3bcd14d76fa2d0d211c50439652d77347384b",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/ui/UiSlider.cpp",
+      "baseline_blob": "0e80900f6e540ae99c482105d9c532b1aabd3bf3",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/ui/UiSlider.h",
+      "baseline_blob": "fb0d84cea327fa20ef5c72423e378021840426d9",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/ui/UiStagedButton.cpp",
+      "baseline_blob": "4c5a6c3aa522959a41c62b3f09209cd829aacd65",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/ui/UiStagedButton.h",
+      "baseline_blob": "22380a4e11c1f4cac88ffb137fddea3e911b2252",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/ui/UiStagedButton.test.cpp",
+      "baseline_blob": "66dbd20e127305047194d797f15e4a4a87870f4c",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/ui/UiSurface.h",
+      "baseline_blob": "bf73c354b2e7ba1a4f6b88b1557b415d258aead7",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/ui/UiTextBox.cpp",
+      "baseline_blob": "0a8e5090808b2370b2ee08943db6be17438262c8",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/ui/UiTextBox.h",
+      "baseline_blob": "ca79afc0fa3ef45cd8656d8f69a89d2e08c689b4",
+      "recorded_last_change": "0ef9d13db4b160ff0e146794e81ccbd951ec0110",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-27"
+    },
+    {
+      "path": "src/rwe/ui/button_sound_util.h",
+      "baseline_blob": "c795a5148be5768aa2fe77e155ae942a064ebcd3",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/ui/button_sound_util.test.cpp",
+      "baseline_blob": "18ec7b0d3c33cf39b15b6819023aa420c656038a",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/ui/difficulty_util.h",
+      "baseline_blob": "6dd853fd2ce7cd6209824a05280a80b41dbc8aa6",
+      "recorded_last_change": "fcdea06b94c29561fb48e6279dc213a81bdea9e0",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/ui/difficulty_util.test.cpp",
+      "baseline_blob": "f2ca8ac719cec684c410e8fabf304864929bc534",
+      "recorded_last_change": "fcdea06b94c29561fb48e6279dc213a81bdea9e0",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/ui/narration_util.h",
+      "baseline_blob": "40afcc05397d2d0130eda74706909ea772f12b67",
+      "recorded_last_change": "fcdea06b94c29561fb48e6279dc213a81bdea9e0",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/ui/narration_util.test.cpp",
+      "baseline_blob": "390314954b01c576431a5f252fb085f596d0f31c",
+      "recorded_last_change": "fcdea06b94c29561fb48e6279dc213a81bdea9e0",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/util.cpp",
+      "baseline_blob": "a0e02f05d681c36cd0bb2b8610fcd86cf0105d60",
+      "recorded_last_change": "3aac994769a6b46cfa2fa3a6de3c8288276d03f8",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-09"
+    },
+    {
+      "path": "src/rwe/util.h",
+      "baseline_blob": "764f842286eb2da3f80725a868142adc7dd106af",
+      "recorded_last_change": "3aac994769a6b46cfa2fa3a6de3c8288276d03f8",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-09"
+    },
+    {
+      "path": "src/rwe/util.test.cpp",
+      "baseline_blob": "5cd960f66128bcb1287ea79a20edf73ea38ec700",
+      "recorded_last_change": "3aac994769a6b46cfa2fa3a6de3c8288276d03f8",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-09"
+    },
+    {
+      "path": "src/rwe/util/ConfigFile.cpp",
+      "baseline_blob": "26e014ed92048899f3d404616e99e89e66ab6285",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/util/ConfigFile.h",
+      "baseline_blob": "7545dfc9492fdb3f3b030163ee5c85bfef9392f0",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/util/ConfigFile.test.cpp",
+      "baseline_blob": "907180f8a2360c836668f82bae7d5998ffeaca54",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/util/OpaqueArgs.h",
+      "baseline_blob": "476ec26d5f2ff9e58e4cb1d5e6fe941df85126ee",
+      "recorded_last_change": "3aac994769a6b46cfa2fa3a6de3c8288276d03f8",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-09"
+    },
+    {
+      "path": "src/rwe/util/rwe_string.cpp",
+      "baseline_blob": "30b84450db621ebbbf0c717bfddf30be45fb8ec4",
+      "recorded_last_change": "fcdea06b94c29561fb48e6279dc213a81bdea9e0",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-18"
+    },
+    {
+      "path": "src/rwe/util/rwe_string.h",
+      "baseline_blob": "be28136a1e15857cd979aad04ec86e54ce4ca16f",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe/util/rwe_string.test.cpp",
+      "baseline_blob": "e636903db0df4944ab5fb0974b3f4f68cce5f1ad",
+      "recorded_last_change": "ebabab353c10e321423ca49c3ba8b7aa335e9fed",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-09-23"
+    },
+    {
+      "path": "src/rwe_bench.cpp",
+      "baseline_blob": "0468163d0d734ff3581dd2ab11cbfa234dee43e3",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    },
+    {
+      "path": "src/rwe_bench_recovery.inc",
+      "baseline_blob": "bb264bc2821c6e0d5cc0b3267ccaf1be9e7314d0",
+      "recorded_last_change": "75425fb0cd550e1cc6196b1d369ee5fd97402406",
+      "recorded_contributor": "Junho Kim",
+      "recorded_date": "2026-10-19"
+    }
+  ]
+}

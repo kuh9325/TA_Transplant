@@ -10,6 +10,14 @@
 
 namespace rwe
 {
+    /**
+     * Maximum number of piece-command/query interruptions handled
+     * for a single unit in one tick. A misbehaving script that
+     * never suspends is rescheduled for the next tick instead of
+     * starving the whole sim.
+     */
+    constexpr unsigned int maxCobInterruptionsPerTick = 1024;
+
     float toFloat(CobSpeed speed)
     {
         return static_cast<float>(speed.value) / 65536.0f;
@@ -85,7 +93,7 @@ namespace rwe
         return static_cast<int>(cobPackCoords(simScalarToCobPosition(x), simScalarToCobPosition(z)));
     }
 
-    using InterruptedReason = std::variant<CobEnvironment::PieceCommandStatus, CobEnvironment::QueryStatus, CobEnvironment::SetQueryStatus>;
+    using InterruptedReason = std::variant<CobEnvironment::PieceCommandStatus, CobEnvironment::QueryStatus, CobEnvironment::SetQueryStatus, CobEnvironment::AttachUnitStatus, CobEnvironment::DetachUnitStatus>;
 
     std::optional<InterruptedReason> executeThreads(CobEnvironment& env, UnitId unitId, GameTime gameTime)
     {
@@ -125,6 +133,12 @@ namespace rwe
                 },
                 [&](const CobEnvironment::SetQueryStatus& status) {
                     return std::optional<InterruptedReason>(status);
+                },
+                [&](const CobEnvironment::AttachUnitStatus& status) {
+                    return std::optional<InterruptedReason>(status);
+                },
+                [&](const CobEnvironment::DetachUnitStatus& status) {
+                    return std::optional<InterruptedReason>(status);
                 });
 
             if (result)
@@ -156,7 +170,9 @@ namespace rwe
             [&](const CobEnvironment::PieceCommandStatus::Turn& t) {
                 // flip z-axis rotations to match our right-handed coordinates
                 auto angle = t.axis == CobAxis::Z ? -t.angle : t.angle;
-                if (t.speed)
+                // stock scripts issue non-positive speeds for "now"
+                // (e.g. CORSPEC); a negative turn step would assert
+                if (t.speed && t.speed->value > 0)
                 {
                     simulation.turnObject(unitId, objectName, toSimAxis(t.axis), toWorldAngle(angle), toSimScalar(*t.speed));
                 }
@@ -221,10 +237,28 @@ namespace rwe
                 return static_cast<int>(unit.activated);
             },
             [&](const CobEnvironment::QueryStatus::StandingFireOrders&) {
-                return 0; // TODO
+                const auto& unit = sim.getUnitState(unitId);
+                switch (unit.fireOrders)
+                {
+                    case UnitFireOrders::HoldFire:
+                        return 0;
+                    case UnitFireOrders::ReturnFire:
+                        return 1;
+                    default:
+                        return 2;
+                }
             },
             [&](const CobEnvironment::QueryStatus::StandingMoveOrders&) {
-                return 0; // TODO
+                const auto& unit = sim.getUnitState(unitId);
+                switch (unit.moveOrders)
+                {
+                    case UnitMoveOrders::HoldPosition:
+                        return 0;
+                    case UnitMoveOrders::Maneuver:
+                        return 1;
+                    default:
+                        return 2;
+                }
             },
             [&](const CobEnvironment::QueryStatus::Health&) {
                 const auto& unit = sim.getUnitState(unitId);
@@ -236,7 +270,8 @@ namespace rwe
                 return static_cast<int>(unit.inBuildStance);
             },
             [&](const CobEnvironment::QueryStatus::Busy&) {
-                return 0;
+                const auto& unit = sim.getUnitState(unitId);
+                return static_cast<int>(unit.busy);
             },
             [&](const CobEnvironment::QueryStatus::PieceXZ& q) {
                 auto pieceId = q.piece;
@@ -313,13 +348,17 @@ namespace rwe
                 return static_cast<int>(unit.yardOpen);
             },
             [&](const CobEnvironment::QueryStatus::BuggerOff&) {
-                return 0; // TODO
+                const auto& unit = sim.getUnitState(unitId);
+                return static_cast<int>(unit.buggerOff);
             },
             [&](const CobEnvironment::QueryStatus::Armored&) {
-                return 0; // TODO
+                const auto& unit = sim.getUnitState(unitId);
+                return static_cast<int>(unit.armored);
             },
             [&](const CobEnvironment::QueryStatus::VeteranLevel&) {
-                return 0; // TODO
+                // Retail's read-port switch only accepts 1..20. This later
+                // community port is unbound, even for a veteran unit.
+                return 0;
             },
             [&](const CobEnvironment::QueryStatus::MinId&) {
                 return 0; // TODO
@@ -359,8 +398,10 @@ namespace rwe
                     // FIXME: unsure if correct return value when unit does not exist
                     return 0;
                 }
-                // TODO: real allied check including teams/alliances
-                return static_cast<int>(targetUnitOption->get().isOwnedBy(unit.owner));
+                // retail GET UNIT_ALLIED consults the player's
+                // alliedWith table: same-owner and ally-group members
+                // return 1
+                return static_cast<int>(sim.areAllied(targetUnitOption->get().owner, unit.owner));
             });
     }
 
@@ -378,17 +419,25 @@ namespace rwe
                     sim.deactivateUnit(unitId);
                 }
             },
-            [&](const CobEnvironment::SetQueryStatus::StandingMoveOrders&) {
-                // TODO
+            [&](const CobEnvironment::SetQueryStatus::StandingMoveOrders& q) {
+                auto& unit = sim.getUnitState(unitId);
+                unit.moveOrders = q.value == 0
+                    ? UnitMoveOrders::HoldPosition
+                    : (q.value == 1 ? UnitMoveOrders::Maneuver : UnitMoveOrders::Roam);
             },
-            [&](const CobEnvironment::SetQueryStatus::StandingFireOrders&) {
-                // TODO
+            [&](const CobEnvironment::SetQueryStatus::StandingFireOrders& q) {
+                auto& unit = sim.getUnitState(unitId);
+                unit.fireOrders = q.value == 0
+                    ? UnitFireOrders::HoldFire
+                    : (q.value == 1 ? UnitFireOrders::ReturnFire : UnitFireOrders::FireAtWill);
             },
             [&](const CobEnvironment::SetQueryStatus::InBuildStance& q) {
                 sim.setBuildStance(unitId, q.value);
             },
-            [&](const CobEnvironment::SetQueryStatus::Busy&) {
-                // TODO
+            [&](const CobEnvironment::SetQueryStatus::Busy& q) {
+                // retail SET BUSY only flips unit+0x10f bit1: a
+                // script-visible flag with no engine consumer
+                sim.getUnitState(unitId).busy = q.value;
             },
             [&](const CobEnvironment::SetQueryStatus::YardOpen& q) {
                 sim.setYardOpen(unitId, q.value);
@@ -396,8 +445,10 @@ namespace rwe
             [&](const CobEnvironment::SetQueryStatus::BuggerOff& q) {
                 sim.setBuggerOff(unitId, q.value);
             },
-            [&](const CobEnvironment::SetQueryStatus::Armored&) {
-                // TODO
+            [&](const CobEnvironment::SetQueryStatus::Armored& q) {
+                // retail SET ARMORED flips unit+0x10e bit1; the damage
+                // routine applies the unitdef DamageModifier while set
+                sim.getUnitState(unitId).armored = q.value;
             });
     }
 
@@ -408,12 +459,22 @@ namespace rwe
 
         assert(env.isNotCorrupt());
 
-        // clean up any finished threads that were not reaped last frame
-        for (const auto& thread : env.finishedQueue)
+        // A weapon can defer consuming its aim result until a later update.
+        // Retain that result until the weapon releases the reference;
+        // deleting it here leaves an unowned pointer and makes saving fail.
+        for (auto it = env.finishedQueue.begin(); it != env.finishedQueue.end();)
         {
-            env.deleteThread(thread);
+            bool referenced = false;
+            for (const auto& weapon : unit.weapons)
+            {
+                if (!weapon) { continue; }
+                auto* attack = std::get_if<UnitWeaponStateAttacking>(&weapon->state);
+                auto* aim = attack ? std::get_if<UnitWeaponStateAttacking::AimInfo>(&attack->attackInfo) : nullptr;
+                referenced |= aim && aim->thread == *it;
+            }
+            if (referenced) { ++it; }
+            else { env.deleteThread(*it); it = env.finishedQueue.erase(it); }
         }
-        env.finishedQueue.clear();
 
         assert(env.isNotCorrupt());
 
@@ -465,7 +526,13 @@ namespace rwe
 
         assert(env.isNotCorrupt());
 
-        // execute ready threads
+        // execute ready threads.
+        // A script that emits an endless stream of interruptions
+        // without suspending would otherwise never yield the sim.
+        // Bound the interruptions handled per unit per tick; the
+        // offending thread stays on the ready queue and resumes
+        // next tick.
+        unsigned int interruptions = 0;
         while (auto result = executeThreads(env, unitId, simulation.gameTime))
         {
             match(
@@ -479,7 +546,69 @@ namespace rwe
                 },
                 [&](const CobEnvironment::SetQueryStatus& s) {
                     handleSetQuery(simulation, env, unitId, s);
+                },
+                [&](const CobEnvironment::AttachUnitStatus& s) {
+                    // script attach-unit: board the unit at the given
+                    // script piece slot. A member already aboard this
+                    // carrier is re-attached to the new slot (retail
+                    // moves it between slots, e.g. ARMTSHIP parks its
+                    // member on the pad then re-attaches at slot -1).
+                    auto targetId = UnitId(s.unitId.value);
+                    auto target = simulation.tryGetUnitState(targetId);
+                    if (!target)
+                    {
+                        return;
+                    }
+                    auto& targetState = target->get();
+                    if (targetState.carriedBy == std::optional<UnitId>(unitId))
+                    {
+                        targetState.attachSlot = s.slot;
+                        targetState.position = simulation.computeAttachPosition(simulation.getUnitState(unitId), s.slot);
+                        return;
+                    }
+                    if (targetState.carriedBy)
+                    {
+                        // aboard another carrier: scripts cannot steal
+                        return;
+                    }
+                    // a script may only pick up a member the engine
+                    // asked it to pick up: the carrier's front order
+                    // must be an in-flight interactive Load for this
+                    // unit. Otherwise the attach is the cosmetic
+                    // re-seat inside TransportDrop, which runs after
+                    // the member was already released.
+                    const auto& carrier = simulation.getUnitState(unitId);
+                    if (carrier.orders.empty()
+                        || !std::holds_alternative<LoadOrder>(carrier.orders.front())
+                        || std::get<LoadOrder>(carrier.orders.front()).target != targetId)
+                    {
+                        return;
+                    }
+                    simulation.tryBoardTransport(targetId, unitId, s.slot);
+                },
+                [&](const CobEnvironment::DetachUnitStatus& s) {
+                    // script drop-unit: release the member at its
+                    // current (attach) position. Members the unload
+                    // order already released arrive detached and this
+                    // is a no-op.
+                    auto targetId = UnitId(s.unitId.value);
+                    auto target = simulation.tryGetUnitState(targetId);
+                    if (target
+                        && target->get().carriedBy == std::optional<UnitId>(unitId))
+                    {
+                        simulation.tryDisembarkUnit(targetId, target->get().position);
+                    }
                 });
+
+            if (++interruptions >= maxCobInterruptionsPerTick)
+            {
+                // move the still-running thread to the back of the
+                // ready queue so other threads are not starved
+                auto thread = env.readyQueue.front();
+                env.readyQueue.pop_front();
+                env.readyQueue.push_back(thread);
+                break;
+            }
         }
 
         assert(env.isNotCorrupt());

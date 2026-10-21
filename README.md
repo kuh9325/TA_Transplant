@@ -4,7 +4,7 @@ A preservation-focused **Apple Silicon / modern macOS compatibility fork of Robo
 
 TA Transplant does not contain original Total Annihilation source code or game assets. It builds on the open-source [Robot War Engine](https://github.com/MHeasell/rwe) codebase and adds platform fixes, compatibility work, and original-TA behavior restoration where the upstream engine differs from the retail game.
 
-> **Status:** playable development build, not a finished replacement for every original Total Annihilation feature.
+> **Status:** uncommitted source publication review candidate; owner review and provenance confirmation pending. Not a finished replacement for every original Total Annihilation feature.
 
 ## Project Goals
 
@@ -15,7 +15,7 @@ TA Transplant does not contain original Total Annihilation source code or game a
 - Keep original Total Annihilation data outside the repository.
 - Avoid unnecessary renderer or engine rewrites when the existing path is already viable.
 
-The source of truth for the macOS port and compatibility work is [docs/macos27/](docs/macos27/).
+See [PUBLICATION.md](PUBLICATION.md) for source provenance, publication exclusions, and validation limits. Historical local audit material is not included in this source distribution.
 
 ## Relationship to Robot War Engine
 
@@ -37,39 +37,15 @@ Upstream project: [MHeasell/rwe](https://github.com/MHeasell/rwe)
 
 ## Current macOS Status
 
-The current public branch has been validated on **Apple Silicon / macOS 27**.
+This source review candidate incorporates the approved C2 native-development source snapshot. The historical integrated baseline passed 583 tests / 695,342 assertions. That is automated coverage, not complete retail parity or human acceptance.
 
-Confirmed work includes:
-
-- native arm64 compilation with Apple Clang;
-- SDL3 startup on macOS;
-- OpenGL 4.1 core rendering through Apple's Metal-backed OpenGL driver;
-- loading a stock Total Annihilation installation directly from an external data path;
-- HPI/UFO/CCX/GP3 and related original-data access through the RWE VFS;
-- main-menu startup with real retail data;
-- loading and running skirmish maps with original OTA/TNT/FBI/3DO/COB content;
-- an arm64-specific angle-conversion undefined-behavior fix that restores the semantics expected by the existing simulation tests;
-- repair-command compatibility, including command routing, cursor/order handling, networking serialization, repair behavior, resource use, and human QA;
-- an input-routing fix for the in-game debug overlay on macOS.
-
-All produced engine/test executables in the audited native build were arm64; Rosetta was not required.
+It includes the simulation, command, mission, save, network, renderer and macOS packaging changes present in that baseline. All native engine source, tests, protocol definitions and 22 shaders are retained without byte changes by this publication preparation. Save writer v16 and hash contract 2 are retained.
 
 ## Known Compatibility Gaps
 
-This fork is still under active compatibility work.
+Full mission breadth, cross-architecture determinism, live multiplayer, save compatibility, interactive gameplay, and clean external-Mac validation remain qualified or pending. No stable signed/notarized binary release is claimed.
 
-On the current public branch:
-
-- **Repair** is implemented and connected end-to-end.
-- **Reclaim** is not yet implemented end-to-end.
-- **D-Gun** command behavior is not yet implemented end-to-end.
-- **Patrol** is not yet implemented end-to-end.
-- several original function-key features (F1-F9) are still absent;
-- cross-architecture floating-point determinism has not been fully proven for multiplayer;
-- one sustained-combat freeze was observed during testing, but its cause has not been confirmed;
-- macOS application bundling, signing, and polished distribution packaging are not complete.
-
-See [docs/macos27/COMPATIBILITY_GAPS.md](docs/macos27/COMPATIBILITY_GAPS.md) and [docs/macos27/PORTING_BACKLOG.md](docs/macos27/PORTING_BACKLOG.md) for the detailed audit.
+This source distribution deliberately omits custom application artwork. Its macOS bundle uses an icon-independent resource configuration; the operating system may display a generic application icon. No generic icon image is copied into this repository.
 
 ## Original Total Annihilation Data
 
@@ -119,40 +95,38 @@ brew install cmake glew protobuf libpng pkgconf
 git submodule update --init --recursive
 ```
 
-### 3. Configure
+### 3. Configure a fresh native build
 
-On the audited machine, Homebrew's split Vorbis/Ogg headers caused SDL3_mixer to detect an unusable system `vorbisfile` configuration. The known-working configuration disables that specific system backend while retaining the vendored/STB Vorbis path:
+The source snapshot includes a version label so a source archive can configure without Git history. The public profile contains no custom icon or retail data. A supported Apple toolchain and the dependencies above are required.
 
 ```sh
-cmake -S . -B build \
-  -G "Unix Makefiles" \
-  -DCMAKE_BUILD_TYPE=Debug \
+cmake -S . -B build-public -G "Unix Makefiles" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=27.0 \
+  -DRWE_STANDALONE_MACOS=ON -DRWE_MACOS_ICON_FORMAT=NONE \
   -DSDLMIXER_VORBIS_VORBISFILE=OFF
+cmake --build build-public --target rwe rwe_test rwe_bench ta_transplant -j 8
 ```
 
-### 4. Build
+### 4. Run tests from the source root
 
 ```sh
-cmake --build build -j"$(sysctl -n hw.ncpu)"
+./build-public/rwe_test
 ```
 
-### 5. Run the test suite
+Graphics tests require an available graphics session and the source-root shader paths. Some optional runtime checks require externally configured, legitimately installed retail data. The build itself does not require retail data.
+
+### 5. Run with original game data
 
 ```sh
-./build/rwe_test
+./build-public/rwe --data-path "/path/to/Total Annihilation"
 ```
 
-### 6. Run with original game data
-
-```sh
-./build/rwe --data-path "/path/to/Total Annihilation"
-```
-
-For the full environment audit and rationale behind the macOS-specific configure flag, see [docs/macos27/BASELINE_AUDIT.md](docs/macos27/BASELINE_AUDIT.md).
+The standalone packaging helper remains a local validation tool. Its strict release policy still requires an icon and signing; this source candidate does not claim binary-release readiness.
 
 ## Development Rules
 
-Compatibility work should follow [docs/macos27/DECISIONS.md](docs/macos27/DECISIONS.md).
+Compatibility work retains the established rules below. Source publication constraints are recorded in [PUBLICATION.md](PUBLICATION.md).
 
 In particular:
 
@@ -172,7 +146,7 @@ shaders/          OpenGL shaders
 proto/            network protocol definitions
 launcher/         Electron/TypeScript launcher and lobby
 libs/             vendored/submodule dependencies
-docs/macos27/     macOS port audit, decisions, backlog, compatibility gaps
+PUBLICATION.md   source provenance, exclusions, and validation limits
 cmake/            CMake support modules
 ```
 

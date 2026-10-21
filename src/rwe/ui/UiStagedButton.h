@@ -54,12 +54,26 @@ namespace rwe
          */
         bool armed{false};
 
+        /**
+         * True while the panel's focus is on this button. SPACE is the
+         * retail focus-activation key -- it fires only here, while the
+         * quickkey char fires from anywhere on the panel.
+         */
+        bool focused{false};
+
         /** True if the button is a toggle and is toggled on. */
         bool toggledOn{false};
 
         BehaviorMode behaviorMode{BehaviorMode::Button};
 
         unsigned int currentStage{0};
+
+        /**
+         * True if the button responds to input. Disabled buttons
+         * (stock GUI "grayedout") render dimmed and swallow clicks
+         * and quick keys.
+         */
+        bool enabled{true};
 
         Subject<ButtonClickEvent> clickSubject;
 
@@ -83,13 +97,23 @@ namespace rwe
 
         void mouseLeave() override;
 
+        void focus() override;
+
         void unfocus() override;
 
-        void keyDown(KeyEvent event) override;
+        bool isFocused() const override { return focused; }
+
+        bool keyDown(KeyEvent event) override;
 
         Observable<ButtonClickEvent>& onClick();
 
         void setStage(unsigned int newStage);
+
+        unsigned int getStage() const;
+
+        unsigned int getStageCount() const { return static_cast<unsigned int>(stages.size()); }
+
+        const std::string& getCurrentStageLabel() const;
 
         bool autoChangeStage{true};
 
@@ -106,6 +130,10 @@ namespace rwe
         void setBehaviorMode(BehaviorMode mode);
 
         void setQuickKey(int quickKey);
+
+        void setEnabled(bool newEnabled);
+
+        bool isEnabled() const;
 
     private:
         void activateButton(const ButtonClickEvent& event);

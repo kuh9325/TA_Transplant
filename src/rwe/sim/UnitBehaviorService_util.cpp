@@ -5,6 +5,22 @@
 
 namespace rwe
 {
+    SimVector veteranAimPoint(const UnitState& shooter, const UnitState& target, const WeaponDefinition& weapon, SimVector point)
+    {
+        if (shooter.kills <= 5 || weapon.cruise || weapon.velocity == 0_ss) { return point; }
+        SimVector velocity(0_ss, 0_ss, 0_ss);
+        if (auto ground = std::get_if<UnitPhysicsInfoGround>(&target.physics))
+        {
+            velocity = toDirection(target.rotation, SimAngle(0)) * ground->currentSpeed;
+        }
+        else if (auto flying = std::get_if<AirMovementStateFlying>(&std::get<UnitPhysicsInfoAir>(target.physics).movementState))
+        {
+            velocity = flying->currentVelocity;
+        }
+        auto travel = (shooter.position - point).length() / weapon.velocity;
+        return point + velocity * travel * SimScalar(52428.0f / 65536.0f);
+    }
+
     SimAngle angleTo(const Vector2x<SimScalar>& lhs, const Vector2x<SimScalar>& rhs)
     {
         return atan2(lhs.det(rhs), lhs.dot(rhs));
@@ -45,7 +61,8 @@ namespace rwe
             },
             [&](const ProjectilePhysicsTypeBallistic&) {
                 return computeBallisticHeadingAndPitch(rotation, from, to, speed, gravity, zOffset);
-            });
+            },
+            [&](const ProjectilePhysicsTypeDropped&) { return std::make_pair(SimAngle(0), SimAngle(0)); });
     }
 
     std::pair<SimAngle, SimAngle> computeLineOfSightHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to)
@@ -342,7 +359,7 @@ namespace rwe
         return findClosestPointOnPerimeter(targetWorldRect, p);
     }
 
-    bool hasReachedGoal(const GameSimulation& sim, const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const NavigationGoal& goal)
+    bool hasReachedGoal(const GameSimulation& sim, const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const NavigationGoal& goal, SimScalar arrivalRadius)
     {
         auto destination = match(
             goal,
@@ -374,7 +391,7 @@ namespace rwe
         SimVector xzDestination(destination->x, 0_ss, destination->z);
         auto distanceSquared = xzPosition.distanceSquared(xzDestination);
 
-        if (distanceSquared < (8_ss * 8_ss))
+        if (distanceSquared < arrivalRadius * arrivalRadius)
         {
             return true;
         }

@@ -1,5 +1,6 @@
 #include "LoadingScene.h"
 #include <algorithm>
+#include <unordered_set>
 #include <rwe/util/SpanStream.h>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/atlas_util.h>
@@ -8,6 +9,7 @@
 #include <rwe/game/GameNetworkService.h>
 #include <rwe/game/MapTerrainGraphics.h>
 #include <rwe/geometry/CollisionMesh.h>
+#include <rwe/io/campaigntdf/CampaignTdf.h>
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/featuretdf/io.h>
 #include <rwe/io/moveinfotdf/MovementClassTdf.h>
@@ -16,9 +18,11 @@
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
 #include <rwe/io/weapontdf/WeaponTdf.h>
+#include <rwe/sim/CampaignAi.h>
 #include <rwe/sim/FeatureDefinitionId.h>
 #include <rwe/ui/UiLabel.h>
 #include <rwe/util/Index.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -63,13 +67,15 @@ namespace rwe
         const SceneContext& sceneContext,
         TdfBlock* audioLookup,
         AudioService::LoopToken&& bgm,
-        GameParameters gameParameters)
+        GameParameters gameParameters,
+        std::optional<DecodedSaveGame>&& savedGame)
         : sceneContext(sceneContext),
           scaledUiRenderService(sceneContext.graphics, sceneContext.shaders, &MenuUiViewport),
           nativeUiRenderService(sceneContext.graphics, sceneContext.shaders, sceneContext.viewport),
           audioLookup(audioLookup),
           bgm(std::move(bgm)),
           gameParameters(std::move(gameParameters)),
+          savedGame(std::move(savedGame)),
           uiFactory(sceneContext.textureService, sceneContext.audioService, audioLookup, sceneContext.vfs, sceneContext.pathMapping, sceneContext.viewport->width(), sceneContext.viewport->height())
     {
     }
@@ -157,6 +163,35 @@ namespace rwe
         std::string otaStr(otaRaw->begin(), otaRaw->end());
         auto ota = parseOta(parseTdfFromString(otaStr));
 
+        // campaign missions select their schema by difficulty name;
+        // skirmishes resolve the Network schema from the configured
+        // player count (retail TotalA.exe 0x436860 mode 3); a saved
+        // game reuses the index recorded in its metadata
+        if (gameParameters.campaign)
+        {
+            schemaIndex = findCampaignSchemaIndex(ota, gameParameters.campaign->difficulty);
+        }
+        else if (!savedGame)
+        {
+            unsigned int playerCount = 0;
+            for (const auto& p : gameParameters.players)
+            {
+                if (p)
+                {
+                    ++playerCount;
+                }
+            }
+            schemaIndex = resolveSkirmishSchemaIndex(ota, playerCount);
+        }
+
+        // the mission's useonly whitelist, needed early so build menus
+        // can be filtered before the scene takes ownership of them
+        std::unordered_set<std::string> useOnlyUnits;
+        if (gameParameters.campaign)
+        {
+            useOnlyUnits = loadUseOnlyUnits(*sceneContext.vfs, sceneContext.pathMapping->camps + "/useonly", ota.useOnlyUnits);
+        }
+
         auto mapInfo = loadMap(mapName, ota, schemaIndex);
         std::unordered_set<std::string> requiredFeatureNames;
         for (const auto& f : mapInfo.features)
@@ -166,9 +201,103 @@ namespace rwe
 
         auto dataMaps = loadDefinitions(meshService, requiredFeatureNames);
 
+        // campaign missions restrict build menus to the useonly whitelist
+        if (gameParameters.campaign && !useOnlyUnits.empty())
+        {
+            for (auto& [builderName, pages] : dataMaps.builderGuisDatabase.builderGuisMap)
+            {
+                for (auto& page : pages)
+                {
+                    // index 0 is the page container, not a unit button
+                    page.erase(
+                        std::remove_if(
+                            page.begin() + (page.empty() ? 0 : 1),
+                            page.end(),
+                            [&](const GuiEntry& e) {
+                                auto n = toUpper(e.common.name);
+                                return dataMaps.unitDefinitions.find(n) != dataMaps.unitDefinitions.end()
+                                    && useOnlyUnits.find(n) == useOnlyUnits.end();
+                            }),
+                        page.end());
+                }
+            }
+        }
+
+        // flatten each builder's GUI pages into its retail build list
+        // (unitdef +0x156), already mission-filtered above; the
+        // campaign AI picks products from this list
+        for (const auto& [builderName, pages] : dataMaps.builderGuisDatabase.builderGuisMap)
+        {
+            auto defIt = dataMaps.unitDefinitions.find(toUpper(builderName));
+            if (defIt == dataMaps.unitDefinitions.end())
+            {
+                continue;
+            }
+            std::unordered_set<std::string> seen;
+            for (const auto& page : pages)
+            {
+                for (std::size_t i = 1; i < page.size(); ++i)
+                {
+                    // only BehaviorBuildButton gadgets are products;
+                    // order-panel buttons can collide with unit names
+                    // (CORBUILD is the build-mode radio, not the CC
+                    // hydration-plant unitdef)
+                    if (!(page[i].common.attribs & GuiButtonAttrib::BehaviorBuildButton))
+                    {
+                        continue;
+                    }
+                    auto n = toUpper(page[i].common.name);
+                    if (dataMaps.unitDefinitions.find(n) != dataMaps.unitDefinitions.end()
+                        && seen.insert(n).second)
+                    {
+                        defIt->second.buildOptions.push_back(n);
+                    }
+                }
+            }
+        }
+
         auto movementClassCollisionService = createMovementClassCollisionService(mapInfo.terrain, dataMaps.movementClassDatabase);
 
-        GameSimulation simulation(std::move(mapInfo.terrain), mapInfo.surfaceMetal, std::max(0, mapInfo.minWindSpeed), std::min(mapInfo.maxWindSpeed, MaxUtilizableWindSpeed));
+        GameSimulation simulation(std::move(mapInfo.terrain), mapInfo.surfaceMetal, std::max(0, mapInfo.minWindSpeed), std::min(mapInfo.maxWindSpeed, MaxUtilizableWindSpeed), mapInfo.tidalStrength);
+
+        // OTA fog-of-war toggles (retail globals at TotalA.exe
+        // +0x39221/+0x3921d): `lineofsight` enables per-player
+        // detection gating, `mapping` keeps explored terrain revealed.
+        simulation.lineOfSightEnabled = ota.lineOfSight != 0;
+        simulation.lineOfSightMode = ota.lineOfSight;
+        simulation.mappingEnabled = ota.mapping != 0;
+
+        // retail per-player UnitLimit: OTA `maxunits`, default 250,
+        // already clamped to [20,500] at parse
+        simulation.maxUnitsPerPlayer = static_cast<unsigned int>(ota.maxUnits);
+
+        // retail water-hazard globals (missionstate +0xd48..+0xd50)
+        simulation.noSeaLevelTrigger = ota.noSeaLevelTrigger;
+        simulation.mapGravity = ota.gravity;
+        simulation.waterDoesDamage = ota.waterDoesDamage;
+        simulation.waterDamage = ota.waterDamage;
+
+        // retail campaign difficulty economy coefficient for
+        // computer-owned units (TotalA.exe ctx+0x37eee)
+        if (gameParameters.campaign)
+        {
+            simulation.computerResourceScale = campaignDifficultyComputerResourceScale(gameParameters.campaign->difficulty);
+        }
+        else
+        {
+            // retail SKIRMISH.GUI toggles override the OTA fog/mapping
+            // globals (live flags word 0x14281: bit0 mapping, bit1
+            // lineofsight, bit2 lostype) plus the CommanderDeath field
+            // at live +0x37ef6. All three LOS stages are fog modes;
+            // the stage index is kept for the GAMEOPTIONS display.
+            simulation.lineOfSightEnabled = true;
+            simulation.lineOfSightMode = static_cast<int>(gameParameters.skirmish.lineOfSight);
+            simulation.mappingEnabled = gameParameters.skirmish.mapping == SkirmishMapping::Mapped;
+            simulation.commanderDeathContinues = gameParameters.skirmish.commanderDeath == SkirmishCommanderDeath::Continues;
+            // the skirmish Difficulty stage indexes the same economy
+            // coefficient table as the campaign difficulty global
+            simulation.computerResourceScale = skirmishDifficultyComputerResourceScale(gameParameters.skirmish.difficulty);
+        }
 
         simulation.unitDefinitions = std::move(dataMaps.unitDefinitions);
         simulation.weaponDefinitions = std::move(dataMaps.weaponDefinitions);
@@ -181,8 +310,12 @@ namespace rwe
 
         for (const auto& [pos, featureName] : mapInfo.features)
         {
-            auto featureId = simulation.tryGetFeatureDefinitionId(featureName).value();
-            simulation.addFeature(featureId, pos.x, pos.y);
+            // TNT/OTA can name features that have no definition;
+            // retail drops them
+            if (auto featureId = simulation.tryGetFeatureDefinitionId(featureName))
+            {
+                simulation.addFeature(*featureId, pos.x, pos.y);
+            }
         }
 
         auto seedSeq = seedFromGameParameters(gameParameters);
@@ -197,38 +330,73 @@ namespace rwe
         auto playerCommandService = std::make_unique<PlayerCommandService>();
 
         std::array<std::optional<PlayerId>, 10> gamePlayers;
+        std::vector<PlayerId> missionPlayers;
         std::vector<GameNetworkService::EndpointInfo> endpointInfos;
 
-        for (Index i = 0; i < getSize(gameParameters.players); ++i)
+        if (gameParameters.campaign)
         {
-            const auto& params = gameParameters.players[i];
-            if (params)
-            {
-                auto playerType = std::visit(IsComputerVisitor(), params->controller) ? GamePlayerType::Computer : GamePlayerType::Human;
-                GamePlayerInfo gpi{params->name, playerType, params->color, GamePlayerStatus::Alive, params->side, params->metal, params->energy, params->metal, params->energy, params->metal, params->energy};
-                auto playerId = simulation.addPlayer(gpi);
-                gamePlayers[i] = playerId;
-                playerCommandService->registerPlayer(playerId);
+            // campaign players come from the mission schema:
+            // mission player 1 is human, others are computers.
+            const auto& schema = ota.schemas.at(schemaIndex);
+            auto campaignPlayers = buildCampaignPlayers(schema, gameParameters.campaign->campaignSide, oppositeSide(gameParameters.campaign->campaignSide));
 
-                if (std::visit(IsHumanVisitor(), params->controller))
+            for (Index i = 0; i < getSize(campaignPlayers); ++i)
+            {
+                auto playerId = addCampaignPlayer(simulation, campaignPlayers[i]);
+                missionPlayers.push_back(playerId);
+                playerCommandService->registerPlayer(playerId, campaignPlayers[i].type == GamePlayerType::Human);
+
+                if (campaignPlayers[i].type == GamePlayerType::Human)
                 {
                     if (localPlayerId)
                     {
                         throw std::runtime_error("Multiple local human players found");
                     }
-
-                    localPlayerId = gamePlayers[i];
+                    localPlayerId = playerId;
                 }
-
-                if (auto networkInfo = std::get_if<PlayerControllerTypeNetwork>(&params->controller); networkInfo != nullptr)
+            }
+        }
+        else
+        {
+            for (Index i = 0; i < getSize(gameParameters.players); ++i)
+            {
+                const auto& params = gameParameters.players[i];
+                if (params)
                 {
-                    endpointInfos.emplace_back(playerId, networkService.getEndpoint(i));
+                    auto playerType = std::visit(IsComputerVisitor(), params->controller) ? GamePlayerType::Computer : GamePlayerType::Human;
+                    GamePlayerInfo gpi{params->name, playerType, params->color, GamePlayerStatus::Alive, params->side, params->allyGroup, params->metal, params->energy, params->metal, params->energy, params->metal, params->energy};
+                    auto playerId = addSkirmishPlayer(simulation, gpi);
+                    gamePlayers[i] = playerId;
+                    playerCommandService->registerPlayer(playerId, playerType == GamePlayerType::Human);
+
+                    if (std::visit(IsHumanVisitor(), params->controller))
+                    {
+                        if (localPlayerId)
+                        {
+                            throw std::runtime_error("Multiple local human players found");
+                        }
+
+                        localPlayerId = gamePlayers[i];
+                    }
+
+                    if (auto networkInfo = std::get_if<PlayerControllerTypeNetwork>(&params->controller); networkInfo != nullptr)
+                    {
+                        endpointInfos.emplace_back(playerId, networkService.getEndpoint(i));
+                    }
                 }
             }
         }
         if (!localPlayerId)
         {
             throw std::runtime_error("No local player!");
+        }
+
+        // a saved game overrides the params-derived local player with
+        // the id recorded in the save; player ids are table indexes so
+        // the saved index is valid against the rebuilt table
+        if (savedGame)
+        {
+            localPlayerId = savedGame->meta.localPlayerId;
         }
 
         auto gameNetworkService = std::make_unique<GameNetworkService>(*localPlayerId, std::stoi(gameParameters.localNetworkPort), endpointInfos, playerCommandService.get());
@@ -260,6 +428,133 @@ namespace rwe
             stateLogStream = std::ofstream(*gameParameters.stateLogFile, std::ios::binary);
         }
 
+        const auto& schema = ota.schemas.at(schemaIndex);
+
+        // OTA meteor-shower hazard (retail schema read 0x4219d1 +
+        // apply 0x418ed0 + init 0x418e50). Runs for every map --
+        // skirmish schemas carry the fields too -- before any saved
+        // game overlay restores the mutable scheduler state.
+        configureMeteorShower(simulation, schema, loadMeteorShowerDefaults(*sceneContext.vfs));
+
+        std::optional<SimVector> campaignCameraPos;
+
+        // saved games restore their full dynamic state over the
+        // freshly-built static world: mission objectives, orders and
+        // script state all come from the save, so the normal
+        // spawn/objective setup below is skipped
+        std::optional<SimVector> savedCameraPos;
+        if (savedGame)
+        {
+            applySavedGame(simulation, *savedGame, sceneContext.campaignProgress);
+            for (const auto& [id, unit] : simulation.units)
+            {
+                if (unit.owner == *localPlayerId)
+                {
+                    savedCameraPos = unit.position;
+                    break;
+                }
+            }
+        }
+
+        // campaign mission state is established on the simulation
+        // before it is moved into the scene
+        if (!savedGame && gameParameters.campaign)
+        {
+            const auto& campaign = *gameParameters.campaign;
+
+            MissionInfo missionInfo;
+            missionInfo.campaignName = campaign.campaignName;
+            missionInfo.campaignSide = campaign.campaignSide;
+            missionInfo.missionName = campaign.missionName;
+            missionInfo.missionIndex = campaign.missionIndex;
+            missionInfo.missionFile = campaign.missionFile;
+            missionInfo.schemaType = schema.type;
+            missionInfo.aiProfile = schema.aiProfile;
+            missionInfo.localPlayerId = *localPlayerId;
+            for (const auto& o : ota.objectives)
+            {
+                missionInfo.objectives.push_back(MissionObjective{o.type, o.params});
+            }
+            missionInfo.useOnlyUnits = useOnlyUnits;
+            missionInfo.brief = ota.brief;
+            missionInfo.killMul = ota.killMul;
+            missionInfo.timeMul = ota.timeMul;
+
+            simulation.missionInfo = std::move(missionInfo);
+            simulation.initMissionObjectives();
+
+            spawnMissionUnits(simulation, schema.units, missionPlayers);
+
+            // execute retained InitialMission strings now that every
+            // mission unit exists and idents can resolve
+            auto bootstrapStats = installInitialMissionOrders(simulation);
+            LOG_INFO << "InitialMission bootstrap: " << bootstrapStats.scriptedUnits << " scripted units, "
+                     << bootstrapStats.parsedCommands << " commands parsed, "
+                     << bootstrapStats.installedOrders << " orders installed, "
+                     << bootstrapStats.stanceCommands << " stance commands, "
+                     << bootstrapStats.deferredCommands << " deferred, "
+                     << bootstrapStats.unsupportedCommands.size() << " unsupported, "
+                     << bootstrapStats.errors.size() << " errors";
+            for (const auto& u : bootstrapStats.unsupportedCommands)
+            {
+                LOG_WARN << "unsupported InitialMission command: " << u;
+            }
+            for (const auto& e : bootstrapStats.errors)
+            {
+                LOG_WARN << "InitialMission error: " << e;
+            }
+
+            // camera: prefer the mission's StartPos1 special, else the
+            // first human-owned unit, else map center
+            auto startPosIt = std::find_if(schema.specials.begin(), schema.specials.end(), [](const OtaSpecial& s) { return s.specialWhat == "StartPos1"; });
+            if (startPosIt != schema.specials.end())
+            {
+                campaignCameraPos = simulation.terrain.topLeftCoordinateToWorld(SimVector(SimScalar(startPosIt->xPos), 0_ss, SimScalar(startPosIt->zPos)));
+            }
+            else
+            {
+                for (const auto& [id, unit] : simulation.units)
+                {
+                    if (unit.owner == *localPlayerId)
+                    {
+                        campaignCameraPos = unit.position;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Retail AI bootstrap (TotalA.exe 0x4648e0): the selected
+        // schema's aiprofile resolves once per game against
+        // ai\<name>[.txt] with ai\default.txt fallback, and the parsed
+        // profile is applied to every computer player (0x464990 slot
+        // loop testing type+0x73==2). Campaign and single-player
+        // skirmish share this machinery; the mode difference is only
+        // which staged difficulty feeds plan gating. Human and network
+        // players never receive a state. For saves that restored AI
+        // state this is a no-op per player.
+        auto aiDifficulty = gameParameters.campaign
+            ? campaignAiDifficultyIndex(gameParameters.campaign->difficulty)
+            : skirmishAiDifficultyIndex(gameParameters.skirmish.difficulty);
+        if (auto profileText = loadCampaignAiProfileText(*sceneContext.vfs, sceneContext.pathMapping->ai, schema.aiProfile))
+        {
+            attachCampaignAiPlayers(simulation, parseCampaignAiProfile(*profileText, aiDifficulty));
+        }
+
+        // retail TotalA.exe 0x497908-0x497ad8: Fixed spawns each
+        // occupied physical slot i at the special whose StartPos
+        // ident equals i (StartPos{i+1}); open slots never shift
+        // later assignments. Random shuffles the pool of occupied
+        // slot indices and deals one to each occupied slot in slot
+        // order. Drawn before the simulation moves into the scene so
+        // the seeded sim RNG is the draw source.
+        std::array<std::optional<unsigned int>, 10> startPosNums;
+        if (!savedGame && !gameParameters.campaign)
+        {
+            startPosNums = assignSkirmishStartPosNums(
+                gameParameters.players, gameParameters.skirmish.startLocation, simulation.rng);
+        }
+
         auto gameScene = std::make_unique<GameScene>(
             sceneContext,
             std::move(playerCommandService),
@@ -278,31 +573,47 @@ namespace rwe
             consoleFont,
             *localPlayerId,
             audioLookup,
+            gameParameters,
             std::move(stateLogStream));
 
-        const auto& schema = ota.schemas.at(schemaIndex);
+        if (savedGame)
+        {
+            auto cameraPos = savedCameraPos.value_or(SimVector(0_ss, 0_ss, 0_ss));
+            gameScene->setCameraPosition(Vector3f(simScalarToFloat(cameraPos.x), 0.0f, simScalarToFloat(cameraPos.z)));
+
+            return gameScene;
+        }
+
+        if (gameParameters.campaign)
+        {
+            auto cameraPos = campaignCameraPos.value_or(SimVector(0_ss, 0_ss, 0_ss));
+            gameScene->setCameraPosition(Vector3f(simScalarToFloat(cameraPos.x), 0.0f, simScalarToFloat(cameraPos.z)));
+
+            return gameScene;
+        }
 
         std::optional<SimVector> humanStartPos;
 
         for (Index i = 0; i < getSize(gameParameters.players); ++i)
         {
             const auto& player = gameParameters.players[i];
-            if (!player)
+            if (!player || !startPosNums[i])
             {
                 continue;
             }
 
-            std::string startPosKey("StartPos");
-            startPosKey.append(std::to_string(i + 1));
-
-            auto startPosIt = std::find_if(schema.specials.begin(), schema.specials.end(), [&startPosKey](const OtaSpecial& s) { return s.specialWhat == startPosKey; });
-            if (startPosIt == schema.specials.end())
+            // retail 0x437320: the slot's assigned number resolves to
+            // the StartPos special with that ident. A missing ident
+            // is retail's "Could not find start position number N on
+            // the map!" path -- the player stays in the game with no
+            // commander rather than shifting onto another slot's spot
+            const OtaSpecial* startPos = findStartPosSpecial(schema, *startPosNums[i]);
+            if (!startPos)
             {
-                throw std::runtime_error("Missing key from schema: " + startPosKey);
+                continue;
             }
-            const auto& startPos = *startPosIt;
 
-            auto worldStartPos = gameScene->getTerrain().topLeftCoordinateToWorld(SimVector(SimScalar(startPos.xPos), 0_ss, SimScalar(startPos.zPos)));
+            auto worldStartPos = gameScene->getTerrain().topLeftCoordinateToWorld(SimVector(SimScalar(startPos->xPos), 0_ss, SimScalar(startPos->zPos)));
             worldStartPos.y = gameScene->getTerrain().getHeightAt(worldStartPos.x, worldStartPos.z);
 
             if (*gamePlayers[i] == *localPlayerId)
@@ -311,7 +622,11 @@ namespace rwe
             }
 
             const auto& sideData = getSideData(player->side);
-            gameScene->spawnCompletedUnit(sideData.commander, *gamePlayers[i], worldStartPos);
+            // retail places skirmish start units unconditionally --
+            // authored start positions may overlap decorative blocking
+            // TNT features and are still occupied (same allowOverlap
+            // path campaign uses for authored mission units)
+            gameScene->spawnCompletedUnit(sideData.commander, *gamePlayers[i], worldStartPos, true);
         }
 
         if (!humanStartPos)
@@ -376,7 +691,7 @@ namespace rwe
             features.emplace_back(Point(f.xPos, f.zPos), f.featureName);
         }
 
-        return LoadMapResult{std::move(terrain), static_cast<unsigned char>(schema.surfaceMetal), ota.minWindSpeed, ota.maxWindSpeed, std::move(features), std::move(terrainGraphics)};
+        return LoadMapResult{std::move(terrain), static_cast<unsigned char>(schema.surfaceMetal), ota.minWindSpeed, ota.maxWindSpeed, ota.tidalStrength, std::move(features), std::move(terrainGraphics)};
     }
 
     std::vector<TextureArrayRegion> LoadingScene::getTileTextures(TntArchive& tnt)
@@ -440,6 +755,10 @@ namespace rwe
     {
         FeatureMediaInfo f;
 
+        if (tdf.flamable)
+        {
+            if (auto sound = lookUpSound("treeburn")) { gameMediaDatabase.addSound("treeburn", *sound); }
+        }
         f.world = tdf.world;
         f.description = tdf.description;
         f.category = tdf.category;
@@ -479,6 +798,29 @@ namespace rwe
                 // ignore them if they don't exist.
                 spriteInfo.shadowAnimation = sceneContext.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameShad);
             }
+            const std::array<std::pair<std::string, std::string>, 3> sequences{{
+                {tdf.seqNameDie, tdf.seqNameDieShad}, {tdf.seqNameReclamate, tdf.seqNameReclamateShad},
+                {tdf.seqNameBurn, tdf.seqNameBurnShad}}};
+            for (unsigned int i = 0; i < sequences.size(); ++i)
+            {
+                auto load = [&](const std::string& seq) -> std::shared_ptr<SpriteSeries> {
+                    if (tdf.fileName.empty() || seq.empty()) { return nullptr; }
+                    return sceneContext.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", seq).value_or(nullptr);
+                };
+                spriteInfo.events[i] = load(sequences[i].first);
+                spriteInfo.eventShadows[i] = load(sequences[i].second);
+                for (const auto& series : {spriteInfo.events[i], spriteInfo.eventShadows[i]})
+                {
+                    if (!series) { continue; }
+                    for (const auto& sprite : series->sprites)
+                    {
+                        const auto& b = sprite->bounds;
+                        auto x = std::max(std::abs(b.left()), std::abs(b.right()));
+                        auto y = std::max(std::abs(b.top()), std::abs(b.bottom())) * (tdf.height >= 10 ? 2.0f : 1.0f);
+                        spriteInfo.eventCullRadii[i] = std::max(spriteInfo.eventCullRadii[i], std::sqrt(x * x + y * y) + 2.0f);
+                    }
+                }
+            }
             f.renderInfo = std::move(spriteInfo);
         }
 
@@ -494,67 +836,12 @@ namespace rwe
 
     void LoadingScene::loadFeature(MeshService& meshService, GameMediaDatabase& gameMediaDatabase, const std::unordered_map<std::string, FeatureTdf>& tdfs, DataMaps& dataMaps, const std::string& initialFeatureName)
     {
-        auto nextId = dataMaps.featureDefinitions.getNextId();
-        std::unordered_map<std::string, FeatureDefinitionId> openSet{{toUpper(initialFeatureName), nextId}};
-        nextId = FeatureDefinitionId(nextId.value + 1);
-        for (std::deque<std::string> featuresToLoad{{initialFeatureName}}; !featuresToLoad.empty(); featuresToLoad.pop_front())
+        // pure-data registration is shared with the save-restore
+        // definition path; media loading stays here
+        auto loadedTdfs = loadFeatureDefinitions(tdfs, dataMaps.featureDefinitions, dataMaps.featureNameIndex, initialFeatureName);
+        for (const auto* tdf : loadedTdfs)
         {
-            const auto& featureName = featuresToLoad.front();
-
-            const auto& tdf = tdfs.at(toUpper(featureName));
-
-            FeatureDefinition f;
-
-            f.name = featureName;
-
-            f.footprintX = tdf.footprintX;
-            f.footprintZ = tdf.footprintZ;
-            f.height = SimScalar(tdf.height);
-
-            f.reclaimable = tdf.reclaimable;
-            f.autoreclaimable = tdf.autoreclaimable;
-            if (!tdf.featureReclamate.empty())
-            {
-                f.featureReclamate = getFeatureId(nextId, dataMaps.featureNameIndex, featuresToLoad, openSet, tdf.featureReclamate);
-            }
-            f.metal = tdf.metal;
-            f.energy = tdf.energy;
-
-            f.flamable = tdf.flamable;
-            if (!tdf.featureBurnt.empty())
-            {
-                f.featureBurnt = getFeatureId(nextId, dataMaps.featureNameIndex, featuresToLoad, openSet, tdf.featureBurnt);
-            }
-            f.burnMin = tdf.burnMin;
-            f.burnMax = tdf.burnMax;
-            f.sparkTime = tdf.sparkTime;
-            f.spreadChance = tdf.spreadChance;
-            f.burnWeapon = tdf.burnWeapon;
-
-            f.geothermal = tdf.geothermal;
-
-            f.hitDensity = tdf.hitDensity;
-
-            f.reproduce = tdf.reproduce;
-            f.reproduceArea = tdf.reproduceArea;
-
-            f.noDisplayInfo = tdf.noDisplayInfo;
-
-            f.permanent = tdf.permanent;
-
-            f.blocking = tdf.blocking;
-
-            f.indestructible = tdf.indestructible;
-            f.damage = tdf.damage;
-            if (!tdf.featureDead.empty())
-            {
-                f.featureDead = getFeatureId(nextId, dataMaps.featureNameIndex, featuresToLoad, openSet, tdf.featureDead);
-            }
-
-            auto id = dataMaps.featureDefinitions.insert(f);
-            dataMaps.featureNameIndex.insert({toUpper(featureName), id});
-
-            loadFeatureMedia(meshService, dataMaps.modelDefinitions, gameMediaDatabase, tdf);
+            loadFeatureMedia(meshService, dataMaps.modelDefinitions, gameMediaDatabase, *tdf);
         }
     }
 
@@ -695,18 +982,20 @@ namespace rwe
                 auto unitDefinition = parseUnitDefinition(fbi, dataMaps.movementClassDatabase);
                 dataMaps.unitDefinitions.insert({toUpper(fbi.unitName), std::move(unitDefinition)});
 
-                // if it's a builder, also attempt to read its gui pages
-                if (fbi.builder)
+                // also attempt to read the unit's gui pages: builder
+                // panels hold the unit product grid, and stockpile
+                // units (ARMSILO/CORSILO/ARMAMD/CORFMD/ARMEMP/CORTRON)
+                // carry a GUI-authored weapon build button
+                // (commonattribs=8 -- e.g. ARMMAKENUKE/ARMMAKEANTI) that
+                // is the only player-facing stockpile control
+                auto guiPages = loadBuilderGui(fbi.unitName);
+                if (guiPages)
                 {
-                    auto guiPages = loadBuilderGui(fbi.unitName);
-                    if (guiPages)
-                    {
-                        dataMaps.builderGuisDatabase.addBuilderGui(fbi.unitName, std::move(*guiPages));
-                    }
-
-                    // TODO: if no gui defined, attempt to build it dynamically?
-                    // Need a database of download.tdf mappings first...
+                    dataMaps.builderGuisDatabase.addBuilderGui(fbi.unitName, std::move(*guiPages));
                 }
+
+                // TODO: if no gui defined, attempt to build it dynamically?
+                // Need a database of download.tdf mappings first...
 
                 auto meshInfo = meshService.loadUnitMesh(fbi.objectName);
                 dataMaps.modelDefinitions.insert({toUpper(fbi.objectName), std::move(meshInfo.modelDefinition)});
@@ -724,6 +1013,12 @@ namespace rwe
                 }
             }
         }
+
+        // TA-Transplant balance: patch the interactive transport
+        // capacities on the loaded definitions (owner-approved
+        // divergence from retail 3.1 -- see DECISIONS.md). Applied
+        // here so every launch mode inherits it identically.
+        applyTransplantBalanceOverrides(dataMaps.unitDefinitions);
 
         // read feature TDFs
         {
@@ -749,10 +1044,17 @@ namespace rwe
                 }
             }
 
-            // actually parse and load assets for features that we require
+            loadFeatureAnimations(*sceneContext.vfs, featureTdfs);
+
+            // actually parse and load assets for features that we require;
+            // stock maps reference feature names with no TDF anywhere
+            // (e.g. EXP1AC04 LushFoliage2-*), which retail drops
             for (const auto& featureName : requiredFeaturesSet)
             {
-                loadFeature(meshService, dataMaps.gameMediaDatabase, featureTdfs, dataMaps, featureName);
+                if (featureTdfs.find(featureName) != featureTdfs.end())
+                {
+                    loadFeature(meshService, dataMaps.gameMediaDatabase, featureTdfs, dataMaps, featureName);
+                }
             }
         }
 

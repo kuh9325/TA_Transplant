@@ -17,6 +17,12 @@ namespace rwe
 
         std::stack<Matrix4f> matrixStack{{Matrix4f::identity()}};
 
+        /**
+         * Clip rectangles in logical viewport coordinates.
+         * An empty optional means no clip is applied.
+         */
+        std::stack<std::optional<Rectangle2f>> clipStack;
+
     public:
         UiRenderService(GraphicsContext* graphics, ShaderService* shaders, const AbstractViewport* viewport);
 
@@ -52,6 +58,16 @@ namespace rwe
         void popMatrix();
 
         /**
+         * Pushes a clip rectangle given in the current local
+         * coordinate space. It is transformed by the current matrix
+         * and intersected with any enclosing clip. All subsequent
+         * drawing is clipped to the rectangle until popClip().
+         */
+        void pushClip(const Rectangle2f& rect);
+
+        void popClip();
+
+        /**
          * Multiplies the current OpenGL matrix with the specified matrix.
          * If the current OpenGL matrix is C and the coordinates to be transformed are v,
          * meaning that the current transformation would be C * v,
@@ -62,13 +78,14 @@ namespace rwe
          */
         void multiplyMatrix(const Matrix4f& matrix);
 
-        template <typename It>
-        float getTextWidth(It begin, It end, const SpriteSeries& font);
-
-        template <typename It>
-        It findEndOfWord(It it, It end);
-
         void fillColor(float x, float y, float width, float height, Color color);
+
+        /**
+         * Draws a batch of pre-built colored triangles with a single draw
+         * call. Equivalent to many fillColor calls sharing the same alpha,
+         * but uploads one mesh instead of one mesh per quad.
+         */
+        void fillColorBatch(const std::vector<GlColoredVertex>& vertices, unsigned char alpha);
 
         void drawHealthBar(float x, float y, float percentFull);
 
@@ -80,35 +97,19 @@ namespace rwe
 
         void drawLine(const Vector2f& start, const Vector2f& end);
 
+        /**
+         * Draws every vertex pair in `vertices` as a line segment in a
+         * single streamed mesh (alpha 1.0). Equivalent to calling
+         * drawLine for each pair, without per-line mesh creation.
+         */
+        void drawLinesBatch(const std::vector<GlColoredVertex>& vertices);
+
         Matrix4f getViewProjectionMatrix() const;
 
         Matrix4f getInverseViewProjectionMatrix() const;
+
+    private:
+        void applyCurrentClip();
     };
 
-    template <typename It>
-    float UiRenderService::getTextWidth(It it, It end, const SpriteSeries& font)
-    {
-        float width = 0;
-        for (; it != end; ++it)
-        {
-            auto ch = *it;
-
-            if (ch > font.sprites.size())
-            {
-                ch = 0;
-            }
-
-            const auto& sprite = *font.sprites[ch];
-
-            width += sprite.bounds.right();
-        }
-
-        return width;
-    }
-
-    template <typename It>
-    It UiRenderService::findEndOfWord(It it, It end)
-    {
-        return std::find_if(it, end, [](int ch) { return ch == ' '; });
-    }
 }

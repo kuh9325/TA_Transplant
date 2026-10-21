@@ -16,6 +16,8 @@ namespace rwe
 
     SimVector toDirection(SimAngle heading, SimAngle pitch);
 
+    SimVector veteranAimPoint(const UnitState& shooter, const UnitState& target, const WeaponDefinition& weapon, SimVector point);
+
     SimVector rotateDirectionXZ(const SimVector& direction, SimAngle angle);
 
     SimScalar getTurnRadius(SimScalar speed, SimScalar turnRate);
@@ -44,7 +46,7 @@ namespace rwe
 
     SimVector findClosestPointToFootprintXZForUnit(const MapTerrain& terrain, const DiscreteRect& targetFootprintRect, const SimVector& p, int unitFootprintX, int unitFootprintZ);
 
-    bool hasReachedGoal(const GameSimulation& sim, const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const NavigationGoal& goal);
+    bool hasReachedGoal(const GameSimulation& sim, const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const NavigationGoal& goal, SimScalar arrivalRadius = 8_ss);
 
     std::string getAimScriptName(unsigned int weaponIndex);
     std::string getAimFromScriptName(unsigned int weaponIndex);

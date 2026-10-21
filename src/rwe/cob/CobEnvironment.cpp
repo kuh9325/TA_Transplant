@@ -7,6 +7,11 @@ namespace rwe
     CobEnvironment::CobEnvironment(const CobScript* script)
         : _script(script), _statics(script->staticVariableCount)
     {
+        for (unsigned int i = 0; i < script->functions.size(); ++i)
+        {
+            // first match wins, same as the old linear scan
+            functionIndices.try_emplace(script->functions[i].name, i);
+        }
     }
 
     int CobEnvironment::getStatic(unsigned int id)
@@ -26,15 +31,14 @@ namespace rwe
 
     std::optional<CobThread> CobEnvironment::createNonScheduledThread(const std::string& functionName, const std::vector<int>& params)
     {
-        auto it = std::find_if(_script->functions.begin(), _script->functions.end(), [&functionName](const auto& i) { return i.name == functionName; });
-        if (it == _script->functions.end())
+        auto it = functionIndices.find(functionName);
+        if (it == functionIndices.end())
         {
             // silently ignore
             return std::nullopt;
         }
 
-        auto index = it - _script->functions.begin();
-        return createNonScheduledThread(index, params);
+        return createNonScheduledThread(it->second, params);
     }
 
     CobThread CobEnvironment::createNonScheduledThread(unsigned int functionId, const std::vector<int>& params)
@@ -61,15 +65,14 @@ namespace rwe
 
     std::optional<const CobThread*> CobEnvironment::createThread(const std::string& functionName, const std::vector<int>& params)
     {
-        auto it = std::find_if(_script->functions.begin(), _script->functions.end(), [&functionName](const auto& i) { return i.name == functionName; });
-        if (it == _script->functions.end())
+        auto it = functionIndices.find(functionName);
+        if (it == functionIndices.end())
         {
             // silently ignore
             return std::nullopt;
         }
 
-        auto index = it - _script->functions.begin();
-        return createThread(index, params);
+        return createThread(it->second, params);
     }
 
     std::optional<const CobThread*> CobEnvironment::createThread(const std::string& functionName)
@@ -88,19 +91,15 @@ namespace rwe
 
     void CobEnvironment::sendSignal(unsigned int signal)
     {
-        for (auto it = threads.begin(); it != threads.end();)
+        for (const auto& thread : threads)
         {
-            if ((*it)->signalMask & signal)
+            if (thread->signalMask & signal)
             {
-                // remove references to the thread
-                removeThreadFromQueues(it->get());
-
-                // delete the thread
-                it = threads.erase(it);
-            }
-            else
-            {
-                ++it;
+                // Cancellation must remain observable by an outstanding aim
+                // consumer. The normal finished-thread cleanup owns deletion.
+                removeThreadFromQueues(thread.get());
+                thread->returnValue = 0;
+                finishedQueue.push_back(thread.get());
             }
         }
     }

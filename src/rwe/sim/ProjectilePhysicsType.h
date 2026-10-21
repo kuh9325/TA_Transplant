@@ -18,5 +18,9 @@ namespace rwe
         SimScalar turnRate;
     };
 
-    using ProjectilePhysicsType = std::variant<ProjectilePhysicsTypeLineOfSight, ProjectilePhysicsTypeBallistic, ProjectilePhysicsTypeTracking>;
+    struct ProjectilePhysicsTypeDropped
+    {
+    };
+
+    using ProjectilePhysicsType = std::variant<ProjectilePhysicsTypeLineOfSight, ProjectilePhysicsTypeBallistic, ProjectilePhysicsTypeTracking, ProjectilePhysicsTypeDropped>;
 }

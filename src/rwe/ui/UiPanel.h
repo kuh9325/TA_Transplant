@@ -15,6 +15,13 @@ namespace rwe
         std::optional<UiComponent*> focusedChild{std::nullopt};
         Subject<GroupMessage> groupMessagesSubject;
 
+        /**
+         * Names of the GUI's escdefault/crdefault controls. Stock GUI
+         * files declare which gadget Escape and Enter activate.
+         */
+        std::string escDefault;
+        std::string crDefault;
+
     public:
         UiPanel(int posX, int posY, unsigned int sizeX, unsigned int sizeY);
         UiPanel(int posX, int posY, unsigned int sizeX, unsigned int sizeY, std::shared_ptr<Sprite> background);
@@ -35,7 +42,7 @@ namespace rwe
 
         void mouseUp(MouseButtonEvent event) override;
 
-        void keyDown(KeyEvent event) override;
+        bool keyDown(KeyEvent event) override;
 
         void keyUp(KeyEvent event) override;
 
@@ -51,6 +58,16 @@ namespace rwe
 
         void unfocus() override;
 
+        void setBackground(std::shared_ptr<Sprite> newBackground)
+        {
+            background = std::move(newBackground);
+        }
+
+        const std::optional<std::shared_ptr<Sprite>>& getBackground() const
+        {
+            return background;
+        }
+
         void appendChild(std::unique_ptr<UiComponent>&& c);
 
         void removeChildrenWithPrefix(const std::string& prefix);
@@ -63,9 +80,28 @@ namespace rwe
 
         void setFocusByName(const std::string& name);
 
+        void setEscDefault(const std::string& name);
+
+        void setCrDefault(const std::string& name);
+
+        const std::string& getEscDefault() const;
+
+        const std::string& getCrDefault() const;
+
         Observable<GroupMessage>& groupMessages();
 
         const Observable<GroupMessage>& groupMessages() const;
+
+    private:
+        /**
+         * Recomputes the clip rectangle of every UiListBox child.
+         * A list box may only draw into the part of its declared
+         * rectangle that is not claimed by a later-declared list box,
+         * so that overlapping GUI layouts compose by painter's order.
+         */
+        void updateListBoxClipRects();
+
+    public:
 
         template <typename T>
         std::optional<std::reference_wrapper<const T>> find(const std::string& name) const
@@ -106,7 +142,7 @@ namespace rwe
 
             static_assert(std::is_base_of_v<UiComponent, T>);
             auto it = std::find_if(children.begin(), children.end(), [&](const auto& c) {
-                return dynamic_cast<const T*>(c.get()) != nullptr && c->contains(x, y);
+                return dynamic_cast<const T*>(c.get()) != nullptr && !c->isHidden() && c->contains(x, y);
             });
             if (it == children.end())
             {

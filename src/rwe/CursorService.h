@@ -18,6 +18,13 @@ namespace rwe
         Move,
         Guard,
         Repair,
+        Reclaim,
+        Patrol,
+        CommandFire,
+        Capture,
+        Load,
+        Unload,
+        Hourglass,
         Red,
         Green,
         NUM_CURSORS

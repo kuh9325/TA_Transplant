@@ -108,7 +108,8 @@ namespace rwe
             REQUIRE(f.permanent == false);
             REQUIRE(f.blocking == true);
             REQUIRE(f.indestructible == false);
-            REQUIRE(f.damage == 1);
+            // Retail parser 0x422a70 passes zero as the missing damage default.
+            REQUIRE(f.damage == 0);
         }
     }
 }

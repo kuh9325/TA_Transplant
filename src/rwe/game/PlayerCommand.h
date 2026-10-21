@@ -45,7 +45,55 @@ namespace rwe
             bool on;
         };
 
-        using Command = std::variant<IssueOrder, ModifyBuildQueue, Stop, SetFireOrders, SetOnOff>;
+        /**
+         * The retail CLOAK_ON / CLOAK_OFF persistent orders
+         * (TotalA.exe order-table entries handled at 0x403070 /
+         * 0x4030a0): sets or clears the unit's cloak-requested flag
+         * (unit+0x110 bit11), gated on the unitdef cloak-capability
+         * bit (+0x245 bit13 = CloakCost > 0). Not a foreground order —
+         * the toggle persists alongside the order queue.
+         */
+        struct SetCloak
+        {
+            bool on;
+        };
+
+        /**
+         * Removes the order at `index` in the unit's order queue
+         * (retail shift+click on a queued order's map marker).
+         * Out-of-range indices are ignored.
+         */
+        struct RemoveOrder
+        {
+            int index;
+        };
+
+        /**
+         * The retail SELFDESTRUCT unit command (TotalA.exe Ctrl/Alt+D
+         * dispatch at 0x49641d). Toggles the unit's interactive
+         * self-destruct state: arms the countdown if idle, cancels it
+         * ("Self destruct terminated") if armed. A unit state, not a
+         * queue order.
+         */
+        struct ToggleSelfDestruct
+        {
+        };
+
+        /**
+         * Queues or cancels rounds of the unit's stockpile weapon: the
+         * GUI `commonattribs=8` weapon build button (ARMSILO's
+         * ARMMAKENUKE, ARMAMD's ARMMAKEANTI, ...) is the only
+         * player-facing stockpile control. Positive counts append
+         * BuildWeaponOrder rounds to backgroundOrders; negative counts
+         * cancel pending rounds. Stockpile production runs in the
+         * background, in parallel with the unit's order queue.
+         */
+        struct ModifyWeaponQueue
+        {
+            int count;
+        };
+
+        using Command = std::variant<IssueOrder, ModifyBuildQueue, Stop, SetFireOrders, SetOnOff, SetCloak, RemoveOrder, ToggleSelfDestruct, ModifyWeaponQueue>;
 
         UnitId unit;
         Command command;

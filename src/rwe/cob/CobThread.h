@@ -7,18 +7,27 @@
 
 namespace rwe
 {
+    // Read-only stack iteration avoids copying/allocating every COB frame while
+    // hashing. Execution retains the normal std::stack interface and ordering.
+    template <typename T>
+    class CobStack : public std::stack<T>
+    {
+    public:
+        const auto& elements() const { return this->c; }
+    };
+
     class CobThread
     {
     public:
         std::string name;
 
-        std::stack<int> stack;
+        CobStack<int> stack;
 
         unsigned int signalMask{0};
 
-        std::stack<CobFunction> callStack;
+        CobStack<CobFunction> callStack;
 
-        int returnValue;
+        int returnValue{0};
 
         /**
          * Required for query functions, which communicate back to the engine

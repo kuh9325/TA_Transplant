@@ -1,6 +1,7 @@
 #include "UiFactory.h"
 #include <algorithm>
 #include <rwe/ui/UiSurface.h>
+#include <rwe/ui/button_sound_util.h>
 #include <rwe/util/Index.h>
 
 #include <memory>
@@ -130,6 +131,15 @@ namespace rwe
         {
             const auto& focusName = *panelEntry.defaultFocus;
             panel->setFocusByName(focusName);
+        }
+
+        if (panelEntry.escdefault)
+        {
+            panel->setEscDefault(*panelEntry.escdefault);
+        }
+        if (panelEntry.crDefault)
+        {
+            panel->setCrDefault(*panelEntry.crDefault);
         }
 
         return panel;
@@ -299,7 +309,12 @@ namespace rwe
                 return labelFromGuiEntry(guiName, entry);
             case GuiElementType::ScrollBar:
                 return scrollBarFromGuiEntry(guiName, entry);
+            case GuiElementType::TextBox:
+                return textBoxFromGuiEntry(guiName, entry);
             case GuiElementType::Surface:
+            case GuiElementType::PictureBox:
+                // a PictureBox is a named image gadget; its sprite is
+                // the same-named GAF entry, assigned by the caller
                 return surfaceFromGuiEntry(guiName, entry);
             default:
                 return std::make_unique<UiComponent>(0, 0, 1, 1);
@@ -327,9 +342,11 @@ namespace rwe
             button->setTextAlign(UiStagedButton::TextAlign::Center);
         }
 
+        bool isToggleStyle = false;
         if (entry.common.attribs & GuiButtonAttrib::BehaviorRadio)
         {
             button->setBehaviorMode(UiStagedButton::BehaviorMode::Radio);
+            isToggleStyle = true;
         }
         else if (entry.common.attribs & GuiButtonAttrib::BehaviorBuildButton)
         {
@@ -338,15 +355,27 @@ namespace rwe
         else if (entry.common.attribs & GuiButtonAttrib::BehaviorToggle)
         {
             button->setBehaviorMode(UiStagedButton::BehaviorMode::Toggle);
+            isToggleStyle = true;
         }
         else if (entry.common.attribs & GuiButtonAttrib::BehaviorCycle)
         {
             button->setBehaviorMode(UiStagedButton::BehaviorMode::Cycle);
         }
 
+        // radio/toggle buttons carry their initial pressed state in status
+        if (isToggleStyle && entry.status && *entry.status != 0)
+        {
+            button->setToggledOn(true);
+        }
+
         if (entry.quickKey)
         {
             button->setQuickKey(convertQuickKeyToSdlk(*entry.quickKey));
+        }
+
+        if (entry.grayedOut && *entry.grayedOut)
+        {
+            button->setEnabled(false);
         }
 
         return button;
@@ -363,6 +392,14 @@ namespace rwe
             entry.common.height,
             entry.text.value_or(""),
             font);
+
+        // retail labels honor the same display-alignment attrib bit as
+        // buttons: set -> centered within the gadget rect (e.g. the
+        // ARMOPT "GAME OPTIONS" title), clear -> left-aligned
+        if (entry.common.attribs & GuiButtonAttrib::LabelDisplayCenter)
+        {
+            label->setAlignment(UiLabel::Alignment::CenterRect);
+        }
 
         return label;
     }
@@ -382,9 +419,20 @@ namespace rwe
             labels,
             entry.stages.value());
 
+        // staged buttons select their initial stage via status
+        if (entry.status && *entry.status != 0 && *entry.status < static_cast<int>(entry.stages.value()))
+        {
+            button->setStage(*entry.status);
+        }
+
         if (entry.quickKey)
         {
             button->setQuickKey(convertQuickKeyToSdlk(*entry.quickKey));
+        }
+
+        if (entry.grayedOut && *entry.grayedOut)
+        {
+            button->setEnabled(false);
         }
 
         return button;
@@ -415,7 +463,7 @@ namespace rwe
         return series;
     }
 
-    std::unique_ptr<UiListBox> UiFactory::listBoxFromGuiEntry(const std::string& /*guiName*/, const GuiEntry& entry)
+    std::unique_ptr<UiListBox> UiFactory::listBoxFromGuiEntry(const std::string& guiName, const GuiEntry& entry)
     {
         auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
 
@@ -429,6 +477,22 @@ namespace rwe
         return listBox;
     }
 
+    std::unique_ptr<UiTextBox> UiFactory::textBoxFromGuiEntry(const std::string& /*guiName*/, const GuiEntry& entry)
+    {
+        auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+
+        auto textBox = std::make_unique<UiTextBox>(
+            entry.common.xpos,
+            entry.common.ypos,
+            entry.common.width,
+            entry.common.height,
+            entry.text.value_or(""),
+            font,
+            entry.maxChars ? static_cast<unsigned int>(*entry.maxChars) : 99u);
+
+        return textBox;
+    }
+
     std::optional<AudioService::SoundHandle> UiFactory::deduceButtonSound(const std::string& guiName, const GuiEntry& entry)
     {
         return deduceButtonSound(guiName, entry.common.name, entry.common.width, entry.common.height);
@@ -436,32 +500,18 @@ namespace rwe
 
     std::optional<AudioService::SoundHandle> UiFactory::deduceButtonSound(const std::string& guiName, const std::string& name, int width, int height)
     {
-        auto sound = getButtonSound(name);
-        if (!sound && (name == "PrevMenu" || name == "PREVMENU"))
+        for (const auto& key : deduceButtonSoundKeys(guiName, name, width, height))
         {
-            sound = getButtonSound("PREVIOUS");
-        }
-        if (!sound && name == "Start")
-        {
-            sound = getButtonSound("BIGBUTTON");
-        }
-        if (!sound)
-        {
-            sound = getButtonSound(guiName);
-        }
-        if (!sound && guiName == "SELMAP")
-        {
-            sound = getButtonSound("SMALLBUTTON");
-        }
-        if (!sound && width == 96 && height == 20)
-        {
-            sound = getButtonSound("BIGBUTTON");
+            if (auto sound = getButtonSound(key))
+            {
+                return sound;
+            }
         }
 
-        return sound;
+        return std::nullopt;
     }
 
-    std::unique_ptr<UiScrollBar> UiFactory::scrollBarFromGuiEntry(const std::string& guiName, const GuiEntry& entry)
+    std::unique_ptr<UiComponent> UiFactory::scrollBarFromGuiEntry(const std::string& guiName, const GuiEntry& entry)
     {
         auto sprites = textureService->getGuiTexture(guiName, "SLIDERS");
         if (!sprites)
@@ -469,14 +519,33 @@ namespace rwe
             throw std::runtime_error("Missing SLIDERS gaf entry");
         }
 
-        auto scrollBar = std::make_unique<UiScrollBar>(
+        if (entry.common.attribs & GuiScrollHorizontalAttrib)
+        {
+            // horizontal option sliders have no runtime backend yet;
+            // they are shown as disabled display gadgets
+            if ((*sprites)->sprites.size() < 20)
+            {
+                // the stock horizontal art is frames 10-19 of SLIDERS
+                return std::make_unique<UiComponent>(
+                    entry.common.xpos,
+                    entry.common.ypos,
+                    entry.common.width,
+                    entry.common.height);
+            }
+            return std::make_unique<UiSlider>(
+                entry.common.xpos,
+                entry.common.ypos,
+                entry.common.width,
+                entry.common.height,
+                *sprites);
+        }
+
+        return std::make_unique<UiScrollBar>(
             entry.common.xpos,
             entry.common.ypos,
             entry.common.width,
             entry.common.height,
             *sprites);
-
-        return scrollBar;
     }
 
     std::shared_ptr<SpriteSeries> UiFactory::getDefaultButtonGraphics(const std::string& guiName, int width, int height)
@@ -484,16 +553,33 @@ namespace rwe
         auto sprites = textureService->getGuiTexture(guiName, "BUTTONS0");
         if (sprites)
         {
+            const auto& frames = (*sprites)->sprites;
             auto it = std::find_if(
-                (*sprites)->sprites.begin(),
-                (*sprites)->sprites.end(),
+                frames.begin(),
+                frames.end(),
                 [width, height](const std::shared_ptr<Sprite>& s) {
                     return s->bounds.width() == width && s->bounds.height() == height;
                 });
 
-            if (it != (*sprites)->sprites.end())
+            // stock gadgets don't always match the BUTTONS0 frame grid
+            // exactly (BRIEFING's OK button is 95x20 against 96x20
+            // frames); retry with the closest same-height frame
+            if (it == frames.end())
             {
-                if ((*sprites)->sprites.end() - it < 3)
+                it = std::min_element(
+                    frames.begin(),
+                    frames.end(),
+                    [width, height](const std::shared_ptr<Sprite>& a, const std::shared_ptr<Sprite>& b) {
+                        auto score = [width, height](const std::shared_ptr<Sprite>& s) {
+                            return std::abs(static_cast<int>(s->bounds.height()) - height) * 10000 + std::abs(static_cast<int>(s->bounds.width()) - width);
+                        };
+                        return score(a) < score(b);
+                    });
+            }
+
+            if (it != frames.end())
+            {
+                if (frames.end() - it < 3)
                 {
                     throw std::runtime_error(
                         "Not enough sprites in BUTTONS0 for button of size " + std::to_string(width) + ", " + std::to_string(height));
@@ -530,6 +616,14 @@ namespace rwe
         }
 
         return audioService->loadSound(*soundName);
+    }
+
+    void UiFactory::playButtonSound(const std::string& buttonName)
+    {
+        if (auto sound = getButtonSound(buttonName))
+        {
+            audioService->playSound(*sound);
+        }
     }
 
     std::unique_ptr<UiComponent> UiFactory::surfaceFromGuiEntry(const std::string& /*guiName*/, const GuiEntry& entry)

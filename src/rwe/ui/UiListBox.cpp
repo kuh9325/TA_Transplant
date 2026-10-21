@@ -4,7 +4,13 @@
 namespace rwe
 {
     UiListBox::UiListBox(int posX, int posY, unsigned int sizeX, unsigned int sizeY, std::shared_ptr<SpriteSeries> font)
-        : UiComponent(posX, posY, sizeX, sizeY), font(std::move(font))
+        : UiComponent(posX, posY, sizeX, sizeY),
+          font(std::move(font)),
+          clipRect(Rectangle2f::fromTopLeft(
+              static_cast<float>(posX),
+              static_cast<float>(posY),
+              static_cast<float>(sizeX),
+              static_cast<float>(sizeY)))
     {
         scrollPosition().subscribe([this](const auto& /*scrollPos*/) {
             ScrollPositionMessage m{getViewportPercent(), getScrollPercent()};
@@ -18,6 +24,8 @@ namespace rwe
 
     void UiListBox::render(UiRenderService& context) const
     {
+        context.pushClip(clipRect);
+
         auto lines = std::min<unsigned int>(numberOfLines(), items.size());
 
         for (unsigned int i = 0; i < lines; ++i)
@@ -33,13 +41,44 @@ namespace rwe
 
             const auto& e = items[itemIndex];
 
-            context.drawText(posX, posY + y, e, *font);
+            if (itemIndex < itemColors.size() && itemColors[itemIndex])
+            {
+                context.drawText(posX, posY + y, e, *font, *itemColors[itemIndex]);
+            }
+            else
+            {
+                context.drawText(posX, posY + y, e, *font);
+            }
         }
+
+        context.popClip();
+    }
+
+    bool UiListBox::contains(int x, int y) const
+    {
+        return clipRect.contains(static_cast<float>(x), static_cast<float>(y));
     }
 
     void UiListBox::appendItem(std::string item)
     {
         items.push_back(std::move(item));
+        itemColors.push_back(std::nullopt);
+        itemsChangedSubject.next(true);
+    }
+
+    void UiListBox::appendItem(std::string item, const Color& color)
+    {
+        items.push_back(std::move(item));
+        itemColors.push_back(color);
+        itemsChangedSubject.next(true);
+    }
+
+    void UiListBox::clearItems()
+    {
+        items.clear();
+        itemColors.clear();
+        selectedIndexSubject.next(std::nullopt);
+        scrollPositionSubject.next(0);
         itemsChangedSubject.next(true);
     }
 
@@ -67,6 +106,16 @@ namespace rwe
             selectedIndexSubject.next(index);
             setScrollPositionCentered(index);
         }
+    }
+
+    void UiListBox::setSelectedIndex(unsigned int index)
+    {
+        if (index >= items.size())
+        {
+            return;
+        }
+        selectedIndexSubject.next(index);
+        setScrollPositionCentered(index);
     }
 
     void UiListBox::clearSelectedItem()
@@ -111,26 +160,31 @@ namespace rwe
         }
     }
 
-    void UiListBox::keyDown(KeyEvent event)
+    bool UiListBox::keyDown(KeyEvent event)
     {
         switch (event.keyCode)
         {
             case SDLK_DOWN:
                 selectNextListItem();
-                break;
+                return true;
 
             case SDLK_UP:
                 selectPreviousListItem();
-                break;
+                return true;
         }
+        return false;
     }
 
     unsigned int UiListBox::numberOfLines() const
     {
-        auto lines = static_cast<unsigned int>((sizeY) / 12.0f);
+        auto lines = static_cast<unsigned int>(clipRect.height() / 12.0f);
 
         // listboxes defined in TA guis tend to be too long,
         // so shorten our number of lines by 1 to compensate.
+        if (lines == 0)
+        {
+            return 0;
+        }
         return lines - 1;
     }
 
@@ -237,6 +291,16 @@ namespace rwe
         }
 
         return static_cast<float>(linesCount) / static_cast<float>(itemCount);
+    }
+
+    void UiListBox::setClipRect(const Rectangle2f& rect)
+    {
+        clipRect = rect;
+    }
+
+    const Rectangle2f& UiListBox::getClipRect() const
+    {
+        return clipRect;
     }
 
     void UiListBox::uiMessage(const GroupMessage& message)

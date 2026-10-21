@@ -208,6 +208,18 @@ namespace rwe
             Plane3x<SimScalar> zPlane(SimVector(0_ss, 0_ss, cellPos.z + zPlaneOffset), SimVector(0_ss, 0_ss, 1_ss));
             auto zIntersect = zPlane.intersect(ray);
 
+            // a non-finite intersection parameter means the line is
+            // degenerate (e.g. NaN coordinates); treat it as missing
+            // so the walk terminates instead of marching forever
+            if (xIntersect && !std::isfinite(xIntersect->value))
+            {
+                xIntersect = std::nullopt;
+            }
+            if (zIntersect && !std::isfinite(zIntersect->value))
+            {
+                zIntersect = std::nullopt;
+            }
+
             if (!xIntersect && !zIntersect)
             {
                 return std::nullopt;

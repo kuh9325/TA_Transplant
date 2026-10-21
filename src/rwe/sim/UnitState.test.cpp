@@ -162,4 +162,47 @@ namespace rwe
             REQUIRE(unit.hitPoints == 500);
         }
     }
+
+    TEST_CASE("UnitState::removeOrderAt")
+    {
+        auto unit = makeUnit();
+        unit.addOrder(MoveOrder(SimVector(1_ss, 0_ss, 0_ss)));
+        unit.addOrder(MoveOrder(SimVector(2_ss, 0_ss, 0_ss)));
+        unit.addOrder(MoveOrder(SimVector(3_ss, 0_ss, 0_ss)));
+
+        SECTION("removes the middle order and preserves the rest")
+        {
+            unit.removeOrderAt(1);
+            REQUIRE(unit.orders.size() == 2);
+            REQUIRE(std::get<MoveOrder>(unit.orders[0]).destination.x == 1_ss);
+            REQUIRE(std::get<MoveOrder>(unit.orders[1]).destination.x == 3_ss);
+        }
+
+        SECTION("removes the active order and clears the in-progress build target")
+        {
+            unit.buildOrderUnitId = UnitId(42);
+
+            unit.removeOrderAt(0);
+
+            REQUIRE(unit.orders.size() == 2);
+            REQUIRE(std::get<MoveOrder>(unit.orders[0]).destination.x == 2_ss);
+            REQUIRE(unit.buildOrderUnitId == std::nullopt);
+        }
+
+        SECTION("keeps build target when removing a queued order")
+        {
+            unit.buildOrderUnitId = UnitId(42);
+
+            unit.removeOrderAt(2);
+
+            REQUIRE(unit.orders.size() == 2);
+            REQUIRE(unit.buildOrderUnitId == UnitId(42));
+        }
+
+        SECTION("ignores an out-of-range index")
+        {
+            unit.removeOrderAt(3);
+            REQUIRE(unit.orders.size() == 3);
+        }
+    }
 }

@@ -38,7 +38,8 @@ namespace rwe
                 {
                     if (self->tracks[i].get() == track)
                     {
-                        self->channelFinished.next(static_cast<int>(i));
+                        std::scoped_lock<std::mutex> lock(self->finishedChannelsLock);
+                        self->finishedChannels.push_back(static_cast<int>(i));
                         break;
                     }
                 }
@@ -122,6 +123,45 @@ namespace rwe
         return sound;
     }
 
+    std::optional<AudioService::SoundHandle> AudioService::loadSoundFromPath(const std::string& vfsPath)
+    {
+        auto soundIter = soundBank.find(vfsPath);
+        if (soundIter != soundBank.end())
+        {
+            return soundIter->second;
+        }
+
+        auto bytes = fileSystem->readFile(vfsPath);
+        if (!bytes)
+        {
+            return std::nullopt;
+        }
+
+        auto rwOps = sdlContext->rwFromConstMem(bytes->data(), bytes->size());
+        auto audio = sdlMixerContext->loadAudioIO(rwOps.get(), true, false);
+        if (!audio)
+        {
+            return std::nullopt;
+        }
+
+        std::shared_ptr<MIX_Audio> sound(audio.release(), [](MIX_Audio* a) { MIX_DestroyAudio(a); });
+        soundBank[vfsPath] = sound;
+
+        return sound;
+    }
+
+    void AudioService::stopChannel(int channel)
+    {
+        haltChannel(channel);
+    }
+
+    bool AudioService::isPlaying(int channel)
+    {
+        return channel >= 0
+            && static_cast<unsigned int>(channel) < tracks.size()
+            && sdlMixerContext->trackPlaying(tracks[channel].get());
+    }
+
     void AudioService::reserveChannels(unsigned int count)
     {
         if (count > tracks.size())
@@ -160,6 +200,19 @@ namespace rwe
     Observable<int>& AudioService::getChannelFinished()
     {
         return channelFinished;
+    }
+
+    void AudioService::dispatchFinishedChannels()
+    {
+        std::deque<int> pending;
+        {
+            std::scoped_lock<std::mutex> lock(finishedChannelsLock);
+            pending.swap(finishedChannels);
+        }
+        for (int channel : pending)
+        {
+            channelFinished.next(channel);
+        }
     }
 
     void AudioService::setVolume(int channel, int volume)

@@ -1,8 +1,19 @@
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/io/cob/Cob.h>
+#include <rwe/sim/UnitState.h>
 #include <rwe/sim/UnitState_util.h>
 
 namespace rwe
 {
+    namespace
+    {
+        UnitState makeUnit()
+        {
+            static CobScript emptyScript{{}, {}, {}, 0};
+            return UnitState(std::vector<UnitMesh>(), std::make_unique<CobEnvironment>(&emptyScript));
+        }
+    }
+
     TEST_CASE("removeFromBuildQueue")
     {
         SECTION("Removes nothing from the empty list")
@@ -109,6 +120,93 @@ namespace rwe
                 {"ARMCK", 7}};
 
             REQUIRE(getBuildQueueTotalsStatic(buildQueue) == expected);
+        }
+    }
+
+    TEST_CASE("expandPatrolOrder")
+    {
+        SECTION("appends the unit position as the route anchor")
+        {
+            auto unit = makeUnit();
+            unit.position = SimVector(10_ss, 0_ss, 20_ss);
+
+            auto expanded = expandPatrolOrder(unit, PatrolOrder({SimVector(100_ss, 0_ss, 200_ss)}));
+
+            const auto& patrol = std::get<PatrolOrder>(expanded);
+            REQUIRE(patrol.waypoints.size() == 2);
+            REQUIRE(static_cast<bool>(patrol.waypoints[0] == SimVector(100_ss, 0_ss, 200_ss)));
+            REQUIRE(static_cast<bool>(patrol.waypoints[1] == SimVector(10_ss, 0_ss, 20_ss)));
+        }
+
+        SECTION("passes non-patrol orders through unchanged")
+        {
+            auto unit = makeUnit();
+            unit.position = SimVector(10_ss, 0_ss, 20_ss);
+
+            auto expanded = expandPatrolOrder(unit, MoveOrder(SimVector(5_ss, 0_ss, 5_ss)));
+
+            const auto& move = std::get<MoveOrder>(expanded);
+            REQUIRE(static_cast<bool>(move.destination == SimVector(5_ss, 0_ss, 5_ss)));
+        }
+    }
+
+    TEST_CASE("enqueueUnitOrder")
+    {
+        SECTION("a patrol on an empty queue installs an anchored route")
+        {
+            auto unit = makeUnit();
+            unit.position = SimVector(10_ss, 0_ss, 20_ss);
+
+            enqueueUnitOrder(unit, PatrolOrder({SimVector(100_ss, 0_ss, 200_ss)}));
+
+            REQUIRE(unit.orders.size() == 1);
+            const auto& patrol = std::get<PatrolOrder>(unit.orders.front());
+            REQUIRE(patrol.waypoints.size() == 2);
+            REQUIRE(static_cast<bool>(patrol.waypoints[1] == SimVector(10_ss, 0_ss, 20_ss)));
+        }
+
+        SECTION("a queued patrol merges into the patrol at the back of the queue")
+        {
+            auto unit = makeUnit();
+            unit.position = SimVector(10_ss, 0_ss, 20_ss);
+
+            enqueueUnitOrder(unit, PatrolOrder({SimVector(100_ss, 0_ss, 200_ss)}));
+            enqueueUnitOrder(unit, PatrolOrder({SimVector(300_ss, 0_ss, 400_ss)}));
+
+            REQUIRE(unit.orders.size() == 1);
+            const auto& patrol = std::get<PatrolOrder>(unit.orders.front());
+            REQUIRE(patrol.waypoints.size() == 3);
+            REQUIRE(static_cast<bool>(patrol.waypoints[0] == SimVector(100_ss, 0_ss, 200_ss)));
+            REQUIRE(static_cast<bool>(patrol.waypoints[1] == SimVector(300_ss, 0_ss, 400_ss)));
+            // the anchor stays last
+            REQUIRE(static_cast<bool>(patrol.waypoints[2] == SimVector(10_ss, 0_ss, 20_ss)));
+        }
+
+        SECTION("a patrol queued behind a non-patrol order starts a new patrol")
+        {
+            auto unit = makeUnit();
+            unit.position = SimVector(10_ss, 0_ss, 20_ss);
+
+            enqueueUnitOrder(unit, MoveOrder(SimVector(1_ss, 0_ss, 1_ss)));
+            enqueueUnitOrder(unit, PatrolOrder({SimVector(100_ss, 0_ss, 200_ss)}));
+
+            REQUIRE(unit.orders.size() == 2);
+            REQUIRE(std::holds_alternative<MoveOrder>(unit.orders.front()));
+            const auto& patrol = std::get<PatrolOrder>(unit.orders.back());
+            REQUIRE(patrol.waypoints.size() == 2);
+        }
+
+        SECTION("a non-patrol queued behind a patrol does not merge")
+        {
+            auto unit = makeUnit();
+            unit.position = SimVector(10_ss, 0_ss, 20_ss);
+
+            enqueueUnitOrder(unit, PatrolOrder({SimVector(100_ss, 0_ss, 200_ss)}));
+            enqueueUnitOrder(unit, MoveOrder(SimVector(5_ss, 0_ss, 5_ss)));
+
+            REQUIRE(unit.orders.size() == 2);
+            REQUIRE(std::holds_alternative<PatrolOrder>(unit.orders.front()));
+            REQUIRE(std::holds_alternative<MoveOrder>(unit.orders.back()));
         }
     }
 }

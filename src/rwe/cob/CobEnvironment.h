@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <rwe/cob/CobAngle.h>
 #include <rwe/cob/CobAngularSpeed.h>
 #include <rwe/cob/CobAxis.h>
@@ -253,7 +254,28 @@ namespace rwe
             Query query;
         };
 
-        using Status = std::variant<SignalStatus, PieceCommandStatus, BlockedStatus, SleepStatus, QueryStatus, SetQueryStatus, FinishedStatus>;
+        /**
+         * COB ATTACH_UNIT interrupt: board `unitId` onto the executing
+         * unit at script piece `slot`. `arg` is the script's third
+         * attach argument (retail stores it; stock scripts pass 0).
+         */
+        struct AttachUnitStatus
+        {
+            CobUnitId unitId;
+            int slot;
+            int arg;
+        };
+
+        /**
+         * COB DROP_UNIT interrupt: release `unitId` from the executing
+         * unit's passenger list at its current position.
+         */
+        struct DetachUnitStatus
+        {
+            CobUnitId unitId;
+        };
+
+        using Status = std::variant<SignalStatus, PieceCommandStatus, BlockedStatus, SleepStatus, QueryStatus, SetQueryStatus, FinishedStatus, AttachUnitStatus, DetachUnitStatus>;
 
     public:
         const CobScript* const _script;
@@ -266,6 +288,15 @@ namespace rwe
         std::deque<std::pair<BlockedStatus, CobThread*>> blockedQueue;
         std::deque<std::pair<CobTime, CobThread*>> sleepingQueue;
         std::deque<CobThread*> finishedQueue;
+
+    private:
+        /**
+         * Function-name -> index cache built once at construction.
+         * Weapon queries and script calls look functions up by name
+         * every tick, and a linear scan of the function table was a
+         * measured hotspot.
+         */
+        std::unordered_map<std::string, unsigned int> functionIndices;
 
     public:
         explicit CobEnvironment(const CobScript* _script);

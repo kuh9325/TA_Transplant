@@ -38,7 +38,7 @@ namespace rwe
         f.featureBurnt = tdf.findValue("featureburnt").value_or(emptyString);
         f.burnMin = tdf.extractUint("burnmin").value_or(0);
         f.burnMax = tdf.extractUint("burnmax").value_or(0);
-        f.sparkTime = tdf.extractUint("sparktime").value_or(0);
+        f.sparkTime = tdf.extractFloat("sparktime").value_or(0);
         f.spreadChance = tdf.extractUint("spreadchance").value_or(0);
         f.burnWeapon = tdf.findValue("burnweapon").value_or(emptyString);
 
@@ -56,10 +56,12 @@ namespace rwe
         f.blocking = tdf.extractBool("blocking").value_or(false);
 
         f.indestructible = tdf.extractBool("indestructible").value_or(false);
-        f.damage = tdf.extractUint("damage").value_or(1);
+        f.damage = tdf.extractUint("damage").value_or(0);
         f.seqNameDie = tdf.findValue("seqnamedie").value_or(emptyString);
         f.featureDead = tdf.findValue("featuredead").value_or(emptyString);
 
+        f.seqNameDieShad = tdf.findValue("seqnamedieshad").value_or(emptyString);
+        f.seqNameReclamateShad = tdf.findValue("seqnamereclamateshad").value_or(emptyString);
         return f;
     }
 }

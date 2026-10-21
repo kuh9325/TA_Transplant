@@ -1,12 +1,23 @@
 #pragma once
 
 #include <optional>
+#include <array>
+#include <vector>
+#include <cstdint>
 #include <rwe/sim/FeatureDefinitionId.h>
 #include <rwe/sim/SimScalar.h>
 #include <string>
 
 namespace rwe
 {
+    enum class FeatureEvent : uint8_t { None, Dying, Reclaiming, Burning };
+
+    struct FeatureAnimation
+    {
+        std::vector<uint16_t> frames;
+        std::vector<uint16_t> shadows;
+    };
+
     struct FeatureDefinition
     {
         std::string name;
@@ -25,7 +36,7 @@ namespace rwe
         std::optional<FeatureDefinitionId> featureBurnt;
         unsigned int burnMin;
         unsigned int burnMax;
-        unsigned int sparkTime;
+        float sparkTime;
         unsigned int spreadChance;
         std::string burnWeapon;
 
@@ -45,6 +56,10 @@ namespace rwe
         bool indestructible;
         unsigned int damage;
         std::optional<FeatureDefinitionId> featureDead;
+
+        bool object{false};
+        // Event cursors use authored GAF delays at 30 Hz, including in headless play.
+        std::array<FeatureAnimation, 3> animations;
 
         bool isStanding() const;
     };

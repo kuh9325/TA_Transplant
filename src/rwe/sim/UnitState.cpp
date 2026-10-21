@@ -255,7 +255,7 @@ namespace rwe
         auto piece = findPiece(pieceName);
         if (!piece)
         {
-            throw std::runtime_error("Invalid piece name: " + pieceName);
+            return;
         }
 
         UnitMesh::MoveOperation op(targetPosition, speed);
@@ -279,7 +279,7 @@ namespace rwe
         auto piece = findPiece(pieceName);
         if (!piece)
         {
-            throw std::runtime_error("Invalid piece name: " + pieceName);
+            return;
         }
 
         switch (axis)
@@ -304,7 +304,7 @@ namespace rwe
         auto piece = findPiece(pieceName);
         if (!piece)
         {
-            throw std::runtime_error("Invalid piece name: " + pieceName);
+            return;
         }
 
         UnitMesh::TurnOperation op(targetAngle, speed);
@@ -328,7 +328,7 @@ namespace rwe
         auto piece = findPiece(pieceName);
         if (!piece)
         {
-            throw std::runtime_error("Invalid piece name: " + pieceName);
+            return;
         }
 
         switch (axis)
@@ -353,7 +353,7 @@ namespace rwe
         auto piece = findPiece(pieceName);
         if (!piece)
         {
-            throw std::runtime_error("Invalid piece name: " + pieceName);
+            return;
         }
 
         UnitMesh::SpinOperation op(acceleration == 0_ss ? speed : 0_ss, speed, acceleration);
@@ -399,7 +399,7 @@ namespace rwe
         auto piece = findPiece(pieceName);
         if (!piece)
         {
-            throw std::runtime_error("Invalid piece name: " + pieceName);
+            return;
         }
 
         switch (axis)
@@ -421,7 +421,7 @@ namespace rwe
         auto piece = findPiece(pieceName);
         if (!piece)
         {
-            throw std::runtime_error("Invalid piece name " + pieceName);
+            return false;
         }
 
         switch (axis)
@@ -442,7 +442,7 @@ namespace rwe
         auto piece = findPiece(pieceName);
         if (!piece)
         {
-            throw std::runtime_error("Invalid piece name " + pieceName);
+            return false;
         }
 
         switch (axis)
@@ -490,17 +490,82 @@ namespace rwe
         buildTimeCompleted = unitDefinition.buildTime;
     }
 
+    bool UnitState::isParalyzed() const
+    {
+        const auto* order = orders.empty() ? nullptr : std::get_if<ParalyzeOrder>(&orders.front());
+        return order && order->resumeAt.has_value();
+    }
+
+    void UnitState::cancelServiceApproach()
+    {
+        if (aircraftService && !aircraftService->docked()) { aircraftService.reset(); }
+    }
+
     void UnitState::clearOrders()
     {
+        cancelServiceApproach();
+        bomberState.reset();
+        // Retail Paralyze has the preserve-on-replace descriptor bit.
+        // Stop/new player or AI orders cannot cancel the EMP interrupt.
+        const auto paralysis = !orders.empty() && std::holds_alternative<ParalyzeOrder>(orders.front())
+            ? std::optional<ParalyzeOrder>(std::get<ParalyzeOrder>(orders.front())) : std::nullopt;
         orders.clear();
+        if (paralysis)
+        {
+            orders.emplace_back(*paralysis);
+            // The interrupted goal was removed by this explicit command,
+            // rather than by the EMP wait itself.
+            navigationState.desiredDestination = std::nullopt;
+            navigationState.state = NavigationStateIdle();
+        }
         buildOrderUnitId = std::nullopt;
 
         // not clear if this really belongs here
         clearWeaponTargets();
     }
 
+    void UnitState::removeOrderAt(std::size_t index)
+    {
+        if (index >= orders.size())
+        {
+            return;
+        }
+
+        if (std::holds_alternative<ParalyzeOrder>(orders[index]))
+        {
+            return;
+        }
+
+        const bool interruptedHead = index == 1 && std::holds_alternative<ParalyzeOrder>(orders.front());
+        orders.erase(orders.begin() + index);
+
+        if (index == 0 || interruptedHead)
+        {
+            cancelServiceApproach();
+            bomberState.reset();
+            buildOrderUnitId = std::nullopt;
+            clearWeaponTargets();
+            if (interruptedHead)
+            {
+                navigationState.desiredDestination = std::nullopt;
+                navigationState.state = NavigationStateIdle();
+            }
+        }
+    }
+
     void UnitState::replaceOrders(const std::deque<UnitOrder>& newOrders)
     {
+        cancelServiceApproach();
+        bomberState.reset();
+        if (!orders.empty() && std::holds_alternative<ParalyzeOrder>(orders.front()))
+        {
+            auto paralysis = std::get<ParalyzeOrder>(orders.front());
+            orders = newOrders;
+            orders.emplace_front(paralysis);
+            navigationState.desiredDestination = std::nullopt;
+            navigationState.state = NavigationStateIdle();
+            return;
+        }
         orders = newOrders;
     }
 
@@ -518,6 +583,7 @@ namespace rwe
         TargetIsUnitVisitor(UnitId unit) : unit(unit) {}
         bool operator()(UnitId target) const { return unit == target; }
         bool operator()(const SimVector&) const { return false; }
+        bool operator()(const ProjectileId&) const { return false; }
     };
 
     class IsAttackingUnitVisitor
@@ -541,6 +607,7 @@ namespace rwe
         TargetIsPositionVisitor(const SimVector& position) : position(position) {}
         bool operator()(UnitId) const { return false; }
         bool operator()(const SimVector& target) const { return target == position; }
+        bool operator()(const ProjectileId&) const { return false; }
     };
 
     class IsAttackingPositionVisitor
@@ -584,6 +651,21 @@ namespace rwe
         }
     }
 
+    void UnitState::setWeaponTarget(unsigned int weaponIndex, ProjectileId target)
+    {
+        auto& weapon = weapons[weaponIndex];
+        if (!weapon)
+        {
+            return;
+        }
+
+        if (auto attacking = std::get_if<UnitWeaponStateAttacking>(&weapon->state); !attacking || !std::holds_alternative<ProjectileId>(attacking->target) || std::get<ProjectileId>(attacking->target) != target)
+        {
+            clearWeaponTarget(weaponIndex);
+            weapon->state = UnitWeaponStateAttacking(target);
+        }
+    }
+
     void UnitState::clearWeaponTarget(unsigned int weaponIndex)
     {
         auto& weapon = weapons[weaponIndex];
@@ -616,7 +698,8 @@ namespace rwe
 
     bool UnitState::isSelectableBy(const UnitDefinition& unitDefinition, rwe::PlayerId player) const
     {
-        return !isDead() && isOwnedBy(player) && !isBeingBuilt(unitDefinition);
+        return !isDead() && isOwnedBy(player) && !carriedBy && !isBeingBuilt(unitDefinition)
+            && (!missionState || missionState->selectable);
     }
 
     void UnitState::activate()
@@ -714,27 +797,9 @@ namespace rwe
         return sum;
     }
 
-    std::optional<std::pair<UnitId, SimVector>> UnitState::getActiveNanolatheTarget() const
+    std::optional<std::pair<UnitState::NanolatheTargetRef, SimVector>> UnitState::getActiveNanolatheTarget() const
     {
-        auto buildingState = std::get_if<UnitBehaviorStateBuilding>(&behaviourState);
-        if (buildingState && buildingState->nanoParticleOrigin)
-        {
-            return std::make_pair(buildingState->targetUnit, *buildingState->nanoParticleOrigin);
-        }
-
-        auto repairingState = std::get_if<UnitBehaviorStateRepairing>(&behaviourState);
-        if (repairingState && repairingState->nanoParticleOrigin)
-        {
-            return std::make_pair(repairingState->targetUnit, *repairingState->nanoParticleOrigin);
-        }
-
-        auto factoryBuildingState = std::get_if<FactoryBehaviorStateBuilding>(&factoryState);
-        if (factoryBuildingState && factoryBuildingState->targetUnit && factoryBuildingState->targetUnit->second)
-        {
-            return std::make_pair(factoryBuildingState->targetUnit->first, *factoryBuildingState->targetUnit->second);
-        }
-
-        return std::nullopt;
+        return activeNanolatheTarget;
     }
 
     std::optional<std::reference_wrapper<const UnitMesh>> UnitState::findPiece(const std::string& pieceName) const

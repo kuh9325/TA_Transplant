@@ -90,6 +90,8 @@ namespace rwe
 
         tdf.readOrDefault("noRadar", w.noRadar);
 
+        tdf.readOrDefault("meteor", w.meteor);
+
         tdf.readOrDefault("model", w.model);
         tdf.readOrDefault("color", w.color);
         tdf.readOrDefault("color2", w.color2);

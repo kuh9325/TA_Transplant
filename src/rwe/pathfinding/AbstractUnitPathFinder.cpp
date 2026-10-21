@@ -18,8 +18,7 @@ namespace rwe
     {
     }
 
-    std::vector<AbstractUnitPathFinder::VertexInfo>
-    AbstractUnitPathFinder::getSuccessors(const VertexInfo& info)
+    void AbstractUnitPathFinder::getSuccessors(const VertexInfo& info, std::vector<VertexInfo>& out)
     {
         std::optional<Direction> prevDirection;
         if (info.predecessor)
@@ -27,10 +26,11 @@ namespace rwe
             prevDirection = pointToDirection(info.vertex - (*info.predecessor)->vertex);
         }
 
-        auto neighbours = getNeighbours(info.vertex);
+        neighbourBuffer.clear();
+        getNeighbours(info.vertex, neighbourBuffer);
 
-        std::vector<VertexInfo> vs;
-        for (const auto& neighbour : neighbours)
+        out.clear();
+        for (const auto& neighbour : neighbourBuffer)
         {
             auto direction = pointToDirection(neighbour - info.vertex);
             auto distance = octileDistance(info.vertex, neighbour);
@@ -42,10 +42,8 @@ namespace rwe
             }
             unsigned int turns = prevDirection ? directionDistance(*prevDirection, direction) : 0;
             PathCost cost(distance, turns);
-            vs.push_back(VertexInfo{info.costToReach + cost, neighbour, &info});
+            out.push_back(VertexInfo{info.costToReach + cost, neighbour, &info});
         }
-
-        return vs;
     }
 
     bool AbstractUnitPathFinder::isWalkable(const Point& p) const
@@ -71,10 +69,10 @@ namespace rwe
         return p + directionVector;
     }
 
-    std::vector<Point> AbstractUnitPathFinder::getNeighbours(const Point& p)
+    void AbstractUnitPathFinder::getNeighbours(const Point& p, std::vector<Point>& out)
     {
-        std::vector<Point> neighbours;
-        neighbours.reserve(Directions.size());
+        out.clear();
+        out.reserve(Directions.size());
 
         for (auto d : Directions)
         {
@@ -85,9 +83,7 @@ namespace rwe
                 continue;
             }
 
-            neighbours.push_back(newPosition);
+            out.push_back(newPosition);
         }
-
-        return neighbours;
     }
 }

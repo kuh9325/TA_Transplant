@@ -32,7 +32,21 @@ namespace rwe
         GameTime finishTime;
     };
 
-    using ParticleRenderType = std::variant<ParticleRenderTypeSprite, ParticleRenderTypeWake>;
+    /**
+     * One square of the retail nanolathe spray (TotalA.exe effect
+     * channel 6). Retail colors each particle from the palette ramp
+     * 0xA1-0xA7 (bright-to-dark green): `rampIndex` starts at the
+     * burst index and advances +1 per tick, wrapping after the last
+     * entry. `finishTime` is the spawn tick + trunc(distance/4)
+     * deadline; the particle dies on the first tick past it.
+     */
+    struct ParticleRenderTypeNanolathe
+    {
+        GameTime finishTime;
+        unsigned int rampIndex;
+    };
+
+    using ParticleRenderType = std::variant<ParticleRenderTypeSprite, ParticleRenderTypeWake, ParticleRenderTypeNanolathe>;
 
     struct Particle
     {

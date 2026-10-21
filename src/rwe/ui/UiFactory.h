@@ -9,7 +9,9 @@
 #include <rwe/ui/UiListBox.h>
 #include <rwe/ui/UiPanel.h>
 #include <rwe/ui/UiScrollBar.h>
+#include <rwe/ui/UiSlider.h>
 #include <rwe/ui/UiStagedButton.h>
+#include <rwe/ui/UiTextBox.h>
 #include <string>
 #include <vector>
 
@@ -53,6 +55,13 @@ namespace rwe
 
         std::unique_ptr<UiStagedButton> createStagedButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::vector<std::string>& labels, unsigned int stages);
 
+        /**
+         * Resolves an ALLSOUND.TDF key and plays the mapped sound,
+         * if present. For sounds a screen emits outside of gadget
+         * activation, mirroring the retail frontend.
+         */
+        void playButtonSound(const std::string& buttonName);
+
     private:
         std::unique_ptr<UiComponent> componentFromGuiEntry(const std::string& guiName, const GuiEntry& entry);
 
@@ -62,9 +71,11 @@ namespace rwe
 
         std::unique_ptr<UiLabel> labelFromGuiEntry(const std::string& guiName, const GuiEntry& entry);
 
-        std::unique_ptr<UiScrollBar> scrollBarFromGuiEntry(const std::string& guiName, const GuiEntry& entry);
+        std::unique_ptr<UiComponent> scrollBarFromGuiEntry(const std::string& guiName, const GuiEntry& entry);
 
         std::unique_ptr<UiListBox> listBoxFromGuiEntry(const std::string& guiName, const GuiEntry& entry);
+
+        std::unique_ptr<UiTextBox> textBoxFromGuiEntry(const std::string& guiName, const GuiEntry& entry);
 
         std::shared_ptr<SpriteSeries> getDefaultButtonGraphics(const std::string& guiName, int width, int height);
 

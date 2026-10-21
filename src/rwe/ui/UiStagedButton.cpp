@@ -68,6 +68,11 @@ namespace rwe
             default:
                 throw std::logic_error("Invalid TextAlign value");
         }
+
+        if (!enabled)
+        {
+            graphics.fillColor(posX, posY, sizeX, sizeY, Color(0, 0, 0, 128));
+        }
     }
 
     UiStagedButton::UiStagedButton(
@@ -91,6 +96,11 @@ namespace rwe
 
     void UiStagedButton::mouseDown(MouseButtonEvent event)
     {
+        if (!enabled || isHidden())
+        {
+            return;
+        }
+
         switch (behaviorMode)
         {
             case BehaviorMode::Radio:
@@ -110,6 +120,11 @@ namespace rwe
 
     void UiStagedButton::mouseUp(MouseButtonEvent event)
     {
+        if (!enabled || isHidden())
+        {
+            return;
+        }
+
         switch (behaviorMode)
         {
             case BehaviorMode::Radio:
@@ -161,8 +176,14 @@ namespace rwe
         }
     }
 
+    void UiStagedButton::focus()
+    {
+        focused = true;
+    }
+
     void UiStagedButton::unfocus()
     {
+        focused = false;
         switch (behaviorMode)
         {
             case BehaviorMode::Button:
@@ -181,16 +202,49 @@ namespace rwe
         return clickSubject;
     }
 
-    void UiStagedButton::keyDown(KeyEvent event)
+    bool UiStagedButton::keyDown(KeyEvent event)
     {
-        if (event.keyCode == SDLK_SPACE || (quickKey && event.keyCode == quickKey))
+        if (!enabled || isHidden())
+        {
+            return false;
+        }
+
+        if (quickKey && event.keyCode == quickKey)
         {
             activateButton({ButtonClickEvent::Source::Keyboard});
+            return true;
         }
+        // SPACE activates the focused control only; panel keyDown
+        // broadcasts, so an unfocused button must not fire
+        if (event.keyCode == SDLK_SPACE && focused)
+        {
+            activateButton({ButtonClickEvent::Source::Keyboard});
+            return true;
+        }
+        return false;
+    }
+
+    void UiStagedButton::setEnabled(bool newEnabled)
+    {
+        enabled = newEnabled;
+        armed = false;
+        pressed = false;
+    }
+
+    bool UiStagedButton::isEnabled() const
+    {
+        return enabled;
     }
 
     void UiStagedButton::activateButton(const ButtonClickEvent& event)
     {
+        // callers that activate a button programmatically (panel
+        // crdefault/escdefault dispatch) must honor the disabled state
+        // the same way click/key paths do
+        if (!enabled)
+        {
+            return;
+        }
         switch (behaviorMode)
         {
             case BehaviorMode::Radio:
@@ -220,6 +274,16 @@ namespace rwe
             throw std::logic_error("New stage is not in range");
         }
         currentStage = newStage;
+    }
+
+    unsigned int UiStagedButton::getStage() const
+    {
+        return currentStage;
+    }
+
+    const std::string& UiStagedButton::getCurrentStageLabel() const
+    {
+        return stages[currentStage].label;
     }
 
     void UiStagedButton::setTextAlign(UiStagedButton::TextAlign align)

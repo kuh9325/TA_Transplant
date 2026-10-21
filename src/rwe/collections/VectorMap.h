@@ -229,6 +229,85 @@ namespace rwe
                 [&](OccupiedEntry& e) { return e.first == id ? iterator(it, vec.end()) : end(); });
         }
 
+        /**
+         * Save/load support: visit every slot in index order, including
+         * free-list entries, so a snapshot can restore the exact future
+         * allocation sequence. The callback receives
+         * (index, slotId, valueOrNullptr, nextFreeIndexOrNullopt):
+         * occupied slots pass their element via valueOrNullptr, free
+         * slots pass the next free slot index via nextFreeIndexOrNullopt.
+         */
+        template <typename F>
+        void forEachSlotState(F&& f) const
+        {
+            for (Index i{0}; i.value < vec.size(); ++i.value)
+            {
+                const auto& e = vec[i.value];
+                if (const auto* o = std::get_if<OccupiedEntry>(&e))
+                {
+                    f(i, o->first, &o->second, std::optional<Index>());
+                }
+                else
+                {
+                    const auto& fr = std::get<FreeEntry>(e);
+                    f(i, fr.id, nullptr, fr.nextIndex);
+                }
+            }
+        }
+
+        std::optional<unsigned int> firstFreeSlot() const
+        {
+            return firstFreeSlotIndex ? std::optional<unsigned int>(firstFreeSlotIndex->value) : std::nullopt;
+        }
+
+        /** One serialized slot: FreeSlot for free-list entries, otherwise the stored value. */
+        struct FreeSlot
+        {
+            Id id;
+            std::optional<unsigned int> nextIndex;
+        };
+        using SlotState = std::variant<FreeSlot, std::pair<Id, T>>;
+
+        /**
+         * Restore the slot table wholesale from a serialized snapshot.
+         * `slots` must contain exactly one entry per slot in index order.
+         * Throws std::runtime_error on malformed data (id index mismatch).
+         */
+        void restoreSlots(std::vector<SlotState>&& slots, std::optional<unsigned int> firstFree)
+        {
+            vec.clear();
+            for (Index i{0}; i.value < slots.size(); ++i.value)
+            {
+                auto& s = slots[i.value];
+                if (auto* o = std::get_if<std::pair<Id, T>>(&s))
+                {
+                    if (extractIndex(o->first) != i)
+                    {
+                        throw std::runtime_error("VectorMap restore: occupied slot id/index mismatch");
+                    }
+                    vec.emplace_back(std::move(*o));
+                }
+                else
+                {
+                    const auto& fr = std::get<FreeSlot>(s);
+                    if (extractIndex(fr.id) != i)
+                    {
+                        throw std::runtime_error("VectorMap restore: free slot id/index mismatch");
+                    }
+                    if (fr.nextIndex && *fr.nextIndex >= slots.size())
+                    {
+                        throw std::runtime_error("VectorMap restore: free-list index out of bounds");
+                    }
+                    vec.emplace_back(FreeEntry(fr.id, fr.nextIndex ? std::optional<Index>(Index(*fr.nextIndex)) : std::nullopt));
+                }
+            }
+            if (firstFree && *firstFree >= slots.size())
+            {
+                throw std::runtime_error("VectorMap restore: first-free index out of bounds");
+            }
+            firstFreeSlotIndex = firstFree ? std::optional<Index>(Index(*firstFree)) : std::nullopt;
+        }
+
     private:
         static Index extractIndex(Id id)
         {

@@ -75,6 +75,13 @@ namespace rwe
 
         bool noRadar;
 
+        /**
+         * TDF `meteor` flag. Retail gates the OTA meteor-shower weapon
+         * selection on it (TotalA.exe 0x418e82, weapon+0x111 bit 0x20):
+         * a configured hazard weapon lacking the flag is rejected.
+         */
+        bool meteor;
+
         std::string model;
         unsigned int color;
         unsigned int color2;

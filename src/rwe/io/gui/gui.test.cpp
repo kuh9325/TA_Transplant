@@ -1,8 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/io/gui/gui.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/vfs/CompositeVirtualFileSystem.h>
 
+#include <cstdlib>
+#include <filesystem>
+#include <unordered_map>
 #include <rwe/optional_io.h>
+
+namespace fs = std::filesystem;
 
 namespace rwe
 {
@@ -184,5 +190,115 @@ namespace rwe
                 requireEntriesEqual((*gui)[i], expected[i]);
             }
         }
+    }
+
+    TEST_CASE("the real GAMEOPTIONS.GUI is a bare GameSettings shell")
+    {
+        // the stock skirmish "GameSettings" dialog (F2 -> Mission on a
+        // non-campaign game) ships only in post-3.1 archives and
+        // contains a transparent header plus a single OK gadget; all
+        // settings text is exe-drawn. Skips without RWE_DATA_PATH.
+        const char* dataPathEnv = std::getenv("RWE_DATA_PATH");
+        if (dataPathEnv == nullptr || !fs::exists(fs::path(dataPathEnv)))
+        {
+            return;
+        }
+
+        auto vfs = constructVfs(fs::path(dataPathEnv));
+        auto bytes = vfs.readFile("guis/GAMEOPTIONS.GUI");
+        REQUIRE(bytes.has_value());
+
+        auto gui = parseGuiFromBytes(*bytes);
+        REQUIRE(gui.has_value());
+        REQUIRE(gui->size() == 2);
+
+        const auto& header = (*gui)[0];
+        REQUIRE(header.common.id == GuiElementType::Panel);
+        REQUIRE(header.common.name == "HEADER");
+        REQUIRE(header.common.xpos == 0);
+        REQUIRE(header.common.ypos == 0);
+        REQUIRE(header.common.width == 269);
+        REQUIRE(header.common.height == 351);
+        REQUIRE(header.totalGadgets == 1);
+        REQUIRE(header.panel.has_value());
+        REQUIRE(header.panel->empty());
+        REQUIRE(header.crDefault == "OK");
+        REQUIRE(header.escdefault == "OK");
+
+        const auto& ok = (*gui)[1];
+        REQUIRE(ok.common.id == GuiElementType::Button);
+        REQUIRE(ok.common.name == "OK");
+        REQUIRE(ok.common.xpos == 85);
+        REQUIRE(ok.common.ypos == 311);
+        REQUIRE(ok.common.width == 95);
+        REQUIRE(ok.common.height == 20);
+        REQUIRE(ok.common.active);
+        REQUIRE(ok.text == "OK");
+
+        // no scrollbar/slider gadgets exist; anything resembling the
+        // thin fragments seen in earlier broken builds must come from
+        // elsewhere
+        for (const auto& entry : *gui)
+        {
+            REQUIRE(entry.common.id != GuiElementType::ScrollBar);
+        }
+    }
+
+    TEST_CASE("the real ENDMSN.GUI debrief layout parses")
+    {
+        // the campaign result screen driven by the endgame state
+        // machine (TotalA.exe 0x41f0a0): a 640x480 panel with the
+        // Missions listbox, KNOB scrollbar, Start/LoadGame/SaveGame/
+        // MainMenu buttons, and a staged Difficulty control.
+        // Skips without RWE_DATA_PATH.
+        const char* dataPathEnv = std::getenv("RWE_DATA_PATH");
+        if (dataPathEnv == nullptr || !fs::exists(fs::path(dataPathEnv)))
+        {
+            return;
+        }
+
+        auto vfs = constructVfs(fs::path(dataPathEnv));
+        auto bytes = vfs.readFile("guis/ENDMSN.GUI");
+        REQUIRE(bytes.has_value());
+
+        auto gui = parseGuiFromBytes(*bytes);
+        REQUIRE(gui.has_value());
+        REQUIRE(gui->size() == 9);
+
+        const auto& header = (*gui)[0];
+        REQUIRE(header.common.id == GuiElementType::Panel);
+        REQUIRE(header.common.xpos == 0);
+        REQUIRE(header.common.ypos == 0);
+        REQUIRE(header.common.width == 640);
+        REQUIRE(header.common.height == 480);
+        REQUIRE(header.totalGadgets == 8);
+        REQUIRE(header.crDefault == "Start");
+
+        std::unordered_map<std::string, const GuiEntry*> byName;
+        for (const auto& entry : *gui)
+        {
+            byName[entry.common.name] = &entry;
+        }
+
+        REQUIRE(byName.count("Missions") == 1);
+        REQUIRE(byName.at("Missions")->common.id == GuiElementType::ListBox);
+        REQUIRE(byName.at("Missions")->common.xpos == 16);
+        REQUIRE(byName.at("Missions")->common.ypos == 385);
+
+        REQUIRE(byName.count("KNOB") == 1);
+        REQUIRE(byName.at("KNOB")->common.id == GuiElementType::ScrollBar);
+
+        REQUIRE(byName.count("Start") == 1);
+        REQUIRE(byName.at("Start")->common.id == GuiElementType::Button);
+        REQUIRE(byName.at("Start")->common.xpos == 460);
+        REQUIRE(byName.at("Start")->common.ypos == 315);
+
+        REQUIRE(byName.count("LoadGame") == 1);
+        REQUIRE(byName.count("SaveGame") == 1);
+        REQUIRE(byName.count("MainMenu") == 1);
+
+        REQUIRE(byName.count("Difficulty") == 1);
+        REQUIRE(byName.at("Difficulty")->common.id == GuiElementType::Button);
+        REQUIRE(byName.at("Difficulty")->common.ypos == 442);
     }
 }

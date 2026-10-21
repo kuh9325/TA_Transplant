@@ -23,69 +23,11 @@
 #include <rwe/ui/UiLightBar.h>
 #include <rwe/ui/UiPanel.h>
 #include <rwe/MeshService.h>
+#include <rwe/GameParameters.h>
+#include <rwe/save/SavedGame.h>
 
 namespace rwe
- {
-    struct PlayerControllerTypeHuman
-    {
-    };
-    struct PlayerControllerTypeComputer
-    {
-    };
-    struct PlayerControllerTypeNetwork
-    {
-        std::string host;
-        std::string port;
-    };
-
-    using PlayerControllerType = std::variant<PlayerControllerTypeHuman, PlayerControllerTypeComputer, PlayerControllerTypeNetwork>;
-
-    class IsHumanVisitor
-    {
-    public:
-        bool operator()(const PlayerControllerTypeHuman&) const { return true; }
-        bool operator()(const PlayerControllerTypeComputer&) const { return false; }
-        bool operator()(const PlayerControllerTypeNetwork&) const { return false; }
-    };
-
-    class IsComputerVisitor
-    {
-    public:
-        bool operator()(const PlayerControllerTypeHuman&) const { return false; }
-        bool operator()(const PlayerControllerTypeComputer&) const { return true; }
-        bool operator()(const PlayerControllerTypeNetwork&) const { return false; }
-    };
-
-    class GetNetworkAddressVisitor
-    {
-    public:
-        std::optional<std::pair<std::reference_wrapper<const std::string>, std::reference_wrapper<const std::string>>> operator()(const PlayerControllerTypeHuman&) const { return std::nullopt; }
-        std::optional<std::pair<std::reference_wrapper<const std::string>, std::reference_wrapper<const std::string>>> operator()(const PlayerControllerTypeComputer&) const { return std::nullopt; }
-        std::optional<std::pair<std::reference_wrapper<const std::string>, std::reference_wrapper<const std::string>>> operator()(const PlayerControllerTypeNetwork& p) const { return std::make_pair(std::cref(p.host), std::cref(p.port)); }
-    };
-
-    struct PlayerInfo
-    {
-        std::optional<std::string> name;
-        PlayerControllerType controller;
-        std::string side;
-        PlayerColorIndex color;
-
-        Metal metal;
-        Energy energy;
-    };
-
-    struct GameParameters
-    {
-        std::string mapName;
-        unsigned int schemaIndex;
-        std::array<std::optional<PlayerInfo>, 10> players;
-        std::string localNetworkPort{"1337"};
-        std::optional<std::string> stateLogFile;
-
-        GameParameters(const std::string& mapName, unsigned int schemaIndex);
-    };
-
+{
     class LoadingScene : public Scene
     {
     private:
@@ -108,12 +50,22 @@ namespace rwe
 
         UiFactory uiFactory;
 
+        /**
+         * When set, this scene restores a saved game instead of
+         * starting a fresh one: static data (map, definitions) loads
+         * as usual, then `applySavedGame` replaces the simulation's
+         * dynamic state; mission spawn/InitialMission/skirmish
+         * commander placement are all skipped.
+         */
+        std::optional<DecodedSaveGame> savedGame;
+
     public:
         LoadingScene(
             const SceneContext& sceneContext,
             TdfBlock* audioLookup,
             AudioService::LoopToken&& bgm,
-            GameParameters gameParameters);
+            GameParameters gameParameters,
+            std::optional<DecodedSaveGame>&& savedGame = std::nullopt);
 
         void init() override;
 
@@ -129,6 +81,7 @@ namespace rwe
             unsigned char surfaceMetal;
             int minWindSpeed;
             int maxWindSpeed;
+            int tidalStrength;
             std::vector<std::pair<Point, std::string>> features;
             MapTerrainGraphics terrainGraphics;
         };

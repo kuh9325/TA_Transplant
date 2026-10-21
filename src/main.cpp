@@ -1,6 +1,8 @@
 #include <GL/glew.h>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <rwe/AudioService.h>
 #include <rwe/ColorPalette.h>
@@ -20,12 +22,15 @@
 #include <rwe/render/OpenGlVersion.h>
 #include <rwe/rwe_time.h>
 #include <rwe/scene/SceneManager.h>
+#include <rwe/save/SavedGame.h>
 #include <rwe/sdl/SdlContext.h>
 #include <rwe/sdl/SdlContextManager.h>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/Metal.h>
 #include <rwe/ui/UiFactory.h>
 #include <rwe/util.h>
+#include <sstream>
+#include <rwe/util/ConfigFile.h>
 #include <rwe/util/OpaqueArgs.h>
 #include <rwe/util/Result.h>
 #include <rwe/util/SimpleLogger.h>
@@ -118,7 +123,132 @@ namespace rwe
         return Ok(std::move(glContext));
     };
 
-    int run(const std::vector<fs::path>& searchPath, const PathMapping& pathMapping, const std::optional<GameParameters>& gameParameters, unsigned int desiredWindowWidth, unsigned int desiredWindowHeight, bool fullscreen, const std::string& imGuiIniPath, GlobalConfig& globalConfig)
+#ifdef __APPLE__
+    struct FolderPickResult
+    {
+        std::optional<fs::path> path;
+    };
+
+    void SDLCALL folderPickCallback(void* userdata, const char* const* filelist, int /*filter*/)
+    {
+        auto* result = static_cast<FolderPickResult*>(userdata);
+        if (filelist != nullptr && filelist[0] != nullptr)
+        {
+            result->path = fs::path(filelist[0]);
+        }
+    }
+
+    /**
+     * Modal NSOpenPanel via SDL's Cocoa dialog backend: with no parent
+     * window the backend runs the panel with -[NSOpenPanel runModal]
+     * and invokes the callback before returning, so this is
+     * synchronous on macOS once SDL's video subsystem has registered
+     * the app (SdlContext). Loops until a plausible TA data folder is
+     * chosen or the user cancels.
+     */
+    std::optional<fs::path> promptForGameDataFolder()
+    {
+        for (;;)
+        {
+            FolderPickResult result;
+            SDL_ShowOpenFolderDialog(&folderPickCallback, &result, nullptr, nullptr, false);
+            if (!result.path)
+            {
+                return std::nullopt;
+            }
+            if (isPlausibleGameDataRoot(*result.path))
+            {
+                return result.path;
+            }
+            SDL_ShowSimpleMessageBox(
+                SDL_MESSAGEBOX_ERROR,
+                "TA Transplant",
+                "The selected folder does not look like a Total Annihilation data folder.\n"
+                "Choose the folder containing the original game archives (totala1.hpi, rev31.gp3, ...).",
+                nullptr);
+        }
+    }
+#endif
+
+    /**
+     * Game-data root precedence:
+     *   1. --data-path arguments / data-path= config lines (a previous
+     *      Finder-picker selection lands in the config layer)
+     *   2. <localData>/Data
+     *   3. macOS only: a native folder-selection panel whose result is
+     *      persisted back into the config file
+     * Supplied directories are used verbatim when at least one is a
+     * plausible TA data root; missing directories are dropped with a
+     * warning (the VFS would throw on them anyway). Returns nullopt
+     * when the user dismissed the picker without a usable data root.
+     */
+    std::optional<std::vector<fs::path>> resolveGameDataPaths(
+        const std::vector<std::string>& supplied,
+        const fs::path& localDataPath,
+        const fs::path& configFilePath)
+    {
+        std::vector<fs::path> roots;
+        bool anyPlausible = false;
+        for (const auto& s : supplied)
+        {
+            std::error_code ec;
+            fs::path p(s);
+            if (!fs::is_directory(p, ec) || ec)
+            {
+                LOG_WARN << "Ignoring missing data path: " << s;
+                continue;
+            }
+            anyPlausible = anyPlausible || isPlausibleGameDataRoot(p);
+            roots.push_back(p);
+        }
+        if (anyPlausible)
+        {
+            return roots;
+        }
+        roots.clear();
+        if (!supplied.empty())
+        {
+            LOG_WARN << "None of the supplied data paths is a plausible TA data root; continuing down the fallback chain";
+        }
+
+        fs::path defaultDataPath = localDataPath / "Data";
+        if (isPlausibleGameDataRoot(defaultDataPath))
+        {
+            return std::vector<fs::path>{defaultDataPath};
+        }
+
+#ifdef __APPLE__
+        if (auto picked = promptForGameDataFolder())
+        {
+            try
+            {
+                writeConfigValue(configFilePath, "data-path", picked->string());
+            }
+            catch (const std::exception& e)
+            {
+                LOG_WARN << "Could not persist the selected data path: " << e.what();
+            }
+            return std::vector<fs::path>{*picked};
+        }
+
+        SDL_ShowSimpleMessageBox(
+            SDL_MESSAGEBOX_ERROR,
+            "TA Transplant",
+            "No Total Annihilation data folder was selected. "
+            "The original game's data files are required.",
+            nullptr);
+        return std::nullopt;
+#else
+        // non-Apple platforms keep the historical behavior verbatim
+        if (!supplied.empty())
+        {
+            return std::vector<fs::path>(supplied.begin(), supplied.end());
+        }
+        return std::vector<fs::path>{defaultDataPath};
+#endif
+    }
+
+    int run(const std::vector<std::string>& suppliedDataPaths, const fs::path& localDataPath, const fs::path& configFilePath, const PathMapping& pathMapping, const std::optional<GameParameters>& gameParameters, std::optional<DecodedSaveGame> savedGame, unsigned int desiredWindowWidth, unsigned int desiredWindowHeight, bool fullscreen, const std::string& imGuiIniPath, GlobalConfig& globalConfig)
     {
         LOG_INFO << ProjectNameVersion;
         LOG_INFO << "Current directory: " << fs::current_path().string();
@@ -129,6 +259,15 @@ namespace rwe
         SdlContextManager sdlManager;
 
         auto sdlContext = sdlManager.getSdlContext();
+
+        // resolve data roots only after SDL video init: on macOS the
+        // folder picker needs the application registered with Cocoa
+        auto searchPathResult = resolveGameDataPaths(suppliedDataPaths, localDataPath, configFilePath);
+        if (!searchPathResult)
+        {
+            return 0;
+        }
+        const auto& searchPath = *searchPathResult;
 
         // require a stencil buffer of some kind
         if (!sdlContext->glSetAttribute(SDL_GL_STENCIL_SIZE, 1))
@@ -252,7 +391,12 @@ namespace rwe
         graphics.enableCulling();
         graphics.enableBlending();
 
-        ShaderService shaders = ShaderService::createShaderService(graphics);
+        // CWD-relative shader lookup first; when the process was
+        // launched without the project working directory (Finder,
+        // relocated bundle), fall back to the executable's resource
+        // root — Contents/Resources inside an .app, the executable's
+        // own directory otherwise
+        ShaderService shaders = ShaderService::createShaderService(graphics, getResourceRoot());
 
         TextureService textureService(&graphics, &vfs, &*palette);
 
@@ -279,6 +423,13 @@ namespace rwe
         cursors[*CursorType::Move] = textureService.getGafEntry("anims/CURSORS.GAF", "cursormove");
         cursors[*CursorType::Guard] = textureService.getGafEntry("anims/CURSORS.GAF", "cursordefend");
         cursors[*CursorType::Repair] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorrepair");
+        cursors[*CursorType::Reclaim] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorreclamate");
+        cursors[*CursorType::Patrol] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorpatrol");
+        cursors[*CursorType::CommandFire] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorairstrike");
+        cursors[*CursorType::Capture] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorcapture");
+        cursors[*CursorType::Load] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorload");
+        cursors[*CursorType::Unload] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorunload");
+        cursors[*CursorType::Hourglass] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorhourglass");
         cursors[*CursorType::Red] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorred");
         cursors[*CursorType::Green] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorgrn");
         CursorService cursor(sdlContext, &timeService, cursors);
@@ -304,6 +455,7 @@ namespace rwe
             }
         }
 
+        rwe::CampaignProgress campaignProgress;
         SceneContext sceneContext(
             sdlContext,
             &viewport,
@@ -319,16 +471,19 @@ namespace rwe
             &sideDataMap,
             &timeService,
             &pathMapping,
-            &globalConfig);
+            &globalConfig,
+            &campaignProgress);
 
         if (gameParameters)
         {
-            LOG_INFO << "Launching into game on map: " << gameParameters->mapName;
+            LOG_INFO << "Launching into game on map: " << gameParameters->mapName
+                     << (savedGame ? " (from saved game)" : "");
             auto scene = std::make_unique<LoadingScene>(
                 sceneContext,
                 &allSoundTdf,
                 AudioService::LoopToken(),
-                *gameParameters);
+                *gameParameters,
+                std::move(savedGame));
             sceneManager.setNextScene(std::shared_ptr<Scene>(std::move(scene)));
         }
         else
@@ -510,7 +665,19 @@ int main(int argc, char* argv[])
 
         rwe::OpaqueArgs args;
         args.parse(argc, argv);
-        args.parseConfig(configFilePath.string());
+        // explicit CLI keys beat the config file; a malformed file is
+        // ignored entirely so corrupt settings fall back to defaults
+        if (auto savedConfig = rwe::readConfigFile(configFilePath))
+        {
+            std::ostringstream savedConfigStream;
+            for (const auto& [key, value] : *savedConfig)
+            {
+                savedConfigStream << key << "=" << value << "\n";
+            }
+            auto savedConfigText = savedConfigStream.str();
+            std::istringstream savedConfigInput(savedConfigText);
+            args.parseConfig(savedConfigInput);
+        }
 
         if (args.isHelpRequested())
         {
@@ -524,6 +691,7 @@ int main(int argc, char* argv[])
                       << "  --interface-mode <m>  left-click or right-click (default: left-click)\n"
                       << "  --data-path <path>    Game data search path (repeatable)\n"
                       << "  --map <name>          Launch directly into a game on this map\n"
+                      << "  --campaign <spec>     Launch a campaign mission: missionfile;side;difficulty\n"
                       << "  --port <port>         Network port (default: 1337)\n"
                       << "  --player <spec>       Player spec: name;type;side;color (repeatable)\n"
                       << "  --dir-<name> <dir>    Override directory name for a data category\n"
@@ -537,9 +705,26 @@ int main(int argc, char* argv[])
         try
         {
             rwe::GlobalConfig config;
+            config.configFilePath = configFilePath;
             config.leftClickInterfaceMode = args.getString("interface-mode", "left-click") != "right-click";
             std::optional<rwe::GameParameters> gameParameters;
-            if (args.contains("map"))
+            std::optional<rwe::DecodedSaveGame> savedGame;
+            if (args.contains("load-save"))
+            {
+                // --load-save <file.sav>: decode the save and launch the
+                // reconstructed game directly (same path as the load
+                // dialog in MainMenuScene::loadSelectedSave)
+                fs::path savePath(args.getString("load-save"));
+                std::ifstream saveFile(savePath, std::ios::binary);
+                if (!saveFile)
+                {
+                    throw std::runtime_error("cannot open save file: " + savePath.string());
+                }
+                std::vector<char> bytes((std::istreambuf_iterator<char>(saveFile)), std::istreambuf_iterator<char>());
+                savedGame = rwe::decodeSavedGame(bytes);
+                gameParameters = rwe::gameParametersFromSave(*savedGame);
+            }
+            else if (args.contains("map"))
             {
                 const auto& mapName = args.getString("map");
                 const auto& players = args.getMulti("player");
@@ -561,18 +746,42 @@ int main(int argc, char* argv[])
                     ++playerIndex;
                 }
             }
+            else if (args.contains("campaign"))
+            {
+                auto components = rwe::utf8Split(args.getString("campaign"), ';');
+                if (components.size() != 3)
+                {
+                    throw std::runtime_error("Invalid campaign arg, expected missionfile;side;difficulty");
+                }
 
-            std::vector<fs::path> gameDataPaths;
+                auto missionFile = components[0];
+                auto mapName = missionFile;
+                if (mapName.size() >= 4 && rwe::toUpper(mapName.substr(mapName.size() - 4)) == ".OTA")
+                {
+                    mapName.resize(mapName.size() - 4);
+                }
 
+                gameParameters = rwe::GameParameters{mapName, 0};
+                if (args.contains("state-log"))
+                {
+                    gameParameters->stateLogFile = args.getString("state-log");
+                }
+                gameParameters->localNetworkPort = args.getString("port", "1337");
+
+                rwe::CampaignMissionParameters campaign;
+                campaign.campaignName = components[0];
+                campaign.campaignSide = components[1];
+                campaign.missionIndex = 0;
+                campaign.missionFile = missionFile;
+                campaign.missionName = components[0];
+                campaign.difficulty = components[2];
+                gameParameters->campaign = campaign;
+            }
+
+            // --data-path values (CLI + config file) are resolved
+            // inside run() after SDL init: with none usable, macOS
+            // shows a folder picker and persists the selection
             auto dataPaths = args.getMulti("data-path");
-            if (!dataPaths.empty())
-            {
-                gameDataPaths.insert(gameDataPaths.end(), dataPaths.begin(), dataPaths.end());
-            }
-            else
-            {
-                gameDataPaths.emplace_back(*localDataPath) /= "Data";
-            }
 
             auto screenWidth = args.getUint("width", 800);
             auto screenHeight = args.getUint("height", 600);
@@ -597,7 +806,7 @@ int main(int argc, char* argv[])
             pathMapping.units = args.getString("dir-units", "units");
             pathMapping.weapons = args.getString("dir-weapons", "weapons");
 
-            return rwe::run(gameDataPaths, pathMapping, gameParameters, screenWidth, screenHeight, fullscreen, imGuiIniFilePath.string(), config);
+            return rwe::run(dataPaths, *localDataPath, configFilePath, pathMapping, gameParameters, std::move(savedGame), screenWidth, screenHeight, fullscreen, imGuiIniFilePath.string(), config);
         }
         catch (const std::exception& e)
         {

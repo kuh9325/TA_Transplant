@@ -135,45 +135,19 @@ namespace rwe
 
     void UiRenderService::drawTextWrapped(Rectangle2f area, const std::string& text, const SpriteSeries& font)
     {
-        float x = 0.0f;
-        float y = 0.0f;
+        auto lines = wrapTextLines(text, area.width(), [&](const std::string& s) {
+            return getTextWidth(s, font);
+        });
 
-        auto it = utf8Begin(text);
-        auto end = utf8End(text);
-        while (it != end)
+        pushClip(area);
+        // first line baseline sits 12px below the top of the area
+        float y = area.top() + 12.0f;
+        for (const auto& line : lines)
         {
-
-            auto endOfWord = findEndOfWord(it, end);
-            auto width = getTextWidth(it, endOfWord, font);
-
-            if (x + width > area.width())
-            {
-                y += 15.0f;
-                x = 0;
-            }
-
-            for (; it != endOfWord; ++it)
-            {
-                auto ch = *it;
-                if (ch > font.sprites.size())
-                {
-                    ch = 0;
-                }
-
-                const auto& sprite = *font.sprites[ch];
-
-                drawSprite(area.left() + x, area.top() + y, sprite);
-
-                x += sprite.bounds.right();
-            }
-
-            if (endOfWord != end)
-            {
-                const auto& spaceSprite = *font.sprites[' '];
-                x += spaceSprite.bounds.right();
-                ++it;
-            }
+            drawText(area.left(), y, line, font);
+            y += 15.0f;
         }
+        popClip();
     }
 
     void UiRenderService::fillColor(float x, float y, float width, float height, Color color)
@@ -201,6 +175,22 @@ namespace rwe
         graphics->drawTriangles(mesh);
     }
 
+    void UiRenderService::fillColorBatch(const std::vector<GlColoredVertex>& vertices, unsigned char alpha)
+    {
+        if (vertices.empty())
+        {
+            return;
+        }
+
+        auto mesh = graphics->createColoredMesh(vertices, GL_STREAM_DRAW);
+
+        const auto& shader = shaders->basicColor;
+        graphics->bindShader(shader.handle.get());
+        graphics->setUniformMatrix(shader.mvpMatrix, getViewProjectionMatrix() * matrixStack.top());
+        graphics->setUniformFloat(shader.alpha, static_cast<float>(alpha) / 255.0f);
+        graphics->drawTriangles(mesh);
+    }
+
     void UiRenderService::pushMatrix()
     {
         matrixStack.push(matrixStack.top());
@@ -215,6 +205,68 @@ namespace rwe
     {
         auto replacement = matrixStack.top() * matrix;
         matrixStack.top() = replacement;
+    }
+
+    void UiRenderService::pushClip(const Rectangle2f& rect)
+    {
+        auto topLeft = matrixStack.top() * Vector3f(rect.left(), rect.top(), 0.0f);
+        auto bottomRight = matrixStack.top() * Vector3f(rect.right(), rect.bottom(), 0.0f);
+
+        auto left = std::min(topLeft.x, bottomRight.x);
+        auto top = std::min(topLeft.y, bottomRight.y);
+        auto right = std::max(topLeft.x, bottomRight.x);
+        auto bottom = std::max(topLeft.y, bottomRight.y);
+
+        // intersect with the enclosing clip, if any
+        if (!clipStack.empty() && clipStack.top())
+        {
+            const auto& outer = *clipStack.top();
+            left = std::max(left, outer.left());
+            top = std::max(top, outer.top());
+            right = std::min(right, outer.right());
+            bottom = std::min(bottom, outer.bottom());
+            if (right < left)
+            {
+                right = left;
+            }
+            if (bottom < top)
+            {
+                bottom = top;
+            }
+        }
+
+        clipStack.push(Rectangle2f::fromTLBR(top, left, bottom, right));
+        applyCurrentClip();
+    }
+
+    void UiRenderService::popClip()
+    {
+        clipStack.pop();
+        applyCurrentClip();
+    }
+
+    void UiRenderService::applyCurrentClip()
+    {
+        if (clipStack.empty() || !clipStack.top())
+        {
+            graphics->clearScissor();
+            return;
+        }
+
+        const auto& rect = *clipStack.top();
+        auto deviceViewport = graphics->getDeviceViewport();
+        float scaleX = static_cast<float>(deviceViewport.width()) / viewport->width();
+        float scaleY = static_cast<float>(deviceViewport.height()) / viewport->height();
+
+        int x = static_cast<int>(std::lround(rect.left() * scaleX));
+        int top = static_cast<int>(std::lround(rect.top() * scaleY));
+        int width = static_cast<int>(std::lround(rect.width() * scaleX));
+        int height = static_cast<int>(std::lround(rect.height() * scaleY));
+
+        // glScissor's origin is the bottom-left of the viewport
+        int y = deviceViewport.y() + static_cast<int>(deviceViewport.height()) - top - height;
+
+        graphics->setScissor(deviceViewport.x() + x, y, width, height);
     }
 
     Color getHealthColor(float fractionFull)
@@ -301,6 +353,15 @@ namespace rwe
             {{start.x, start.y, 0.0f}, floatColor},
             {{end.x, end.y, 0.0f}, floatColor},
         };
+        drawLinesBatch(vertices);
+    }
+
+    void UiRenderService::drawLinesBatch(const std::vector<GlColoredVertex>& vertices)
+    {
+        if (vertices.empty())
+        {
+            return;
+        }
 
         auto mesh = graphics->createColoredMesh(vertices, GL_STREAM_DRAW);
 

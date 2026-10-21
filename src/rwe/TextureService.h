@@ -48,8 +48,16 @@ namespace rwe
         std::shared_ptr<Sprite> getMinimap(const std::string& mapName);
         std::shared_ptr<SpriteSeries> getFont(const std::string& fontName);
 
+        /**
+         * Loads a PCX image from an explicit VFS path (including
+         * extension) as a full-texture sprite, e.g. campaign glamour
+         * art under bitmaps/glamour. Returns nullopt when absent.
+         */
+        std::optional<std::shared_ptr<Sprite>> tryGetPcxSprite(const std::string& vfsPath);
+
     private:
         std::optional<std::shared_ptr<SpriteSeries>> getGafEntryInternal(const std::string& gafName, const std::string& entryName);
         TextureInfo getBitmapInternal(const std::string& bitmapName);
+        std::optional<TextureInfo> getBitmapInternalAtPath(const std::string& vfsPath);
     };
 }

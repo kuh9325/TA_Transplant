@@ -1,4 +1,5 @@
 #include "PathFindingService.h"
+#include <algorithm>
 #include <rwe/pathfinding/UnitPathFinder.h>
 #include <rwe/pathfinding/UnitPerimeterPathFinder.h>
 #include <rwe/pathfinding/pathfinding_utils.h>
@@ -13,6 +14,7 @@ namespace rwe
         int remainingBudget = 4000;
 
         auto& requests = simulation.pathRequests;
+        stats.maxQueueDepth = std::max<unsigned int>(stats.maxQueueDepth, requests.size());
         while (!requests.empty() && remainingBudget > 0)
         {
             auto& request = requests.front();
@@ -37,12 +39,26 @@ namespace rwe
                         return findPath(simulation, request.unitId, pos);
                     });
 
+                const bool isPartial = path.isPartial;
+
                 movingState->path = PathFollowingInfo(std::move(path), simulation.gameTime);
                 movingState->pathRequested = false;
+                movingState->pathExhausted = false;
+                // A partial path means the search hit the vertex cap --
+                // a failed request. Retail sleeps the move job ~30
+                // ticks on a failed path request (TotalA.exe 0x439e80);
+                // delay the order-visible exhaustion result to match,
+                // so a request that fails instantly cannot re-issue a
+                // full search every few ticks.
+                movingState->pathExhaustedAt = isPartial ? simulation.gameTime + GameTime(30) : GameTime(0);
 
                 // HACK: we know that lastPathDebugInfo is set by the call to findPath,
                 // so we'll exploit it here to deduct from out budget.
-                remainingBudget -= getSize(lastPathDebugInfo.closedVertices);
+                const auto expansions = getSize(lastPathDebugInfo.closedVertices);
+                remainingBudget -= expansions;
+                ++stats.requestsProcessed;
+                stats.totalExpansions += expansions;
+                stats.maxExpansionsPerRequest = std::max<unsigned int>(stats.maxExpansionsPerRequest, expansions);
             }
 
             requests.pop_front();
@@ -68,10 +84,13 @@ namespace rwe
 
         assert(path.path.size() >= 1);
 
+        bool isPartial = path.type == AStarPathType::Partial;
+
         if (path.path.size() == 1)
         {
-            // The path is trivial, we are already at the goal.
-            return UnitPath{std::vector<SimVector>{unit.position}};
+            // The path is trivial, we are already at the goal
+            // (or at the closest reachable point, for a partial path).
+            return UnitPath{std::vector<SimVector>{unit.position}, isPartial};
         }
 
         auto simplifiedPath = runSimplifyPath(path.path);
@@ -82,7 +101,7 @@ namespace rwe
             waypoints.push_back(getWorldCenter(simulation, DiscreteRect(it->x, it->y, start.width, start.height)));
         }
 
-        return UnitPath{std::move(waypoints)};
+        return UnitPath{std::move(waypoints), isPartial};
     }
 
     UnitPath PathFindingService::findPath(const GameSimulation& simulation, UnitId unitId, const SimVector& destination)
@@ -101,17 +120,19 @@ namespace rwe
         auto path = pathFinder.findPath(Point(start.x, start.y));
         lastPathDebugInfo = AStarPathInfo<Point, PathCost>{path.type, path.path, std::move(path.closedVertices)};
 
-        if (path.type == AStarPathType::Partial)
-        {
-            path.path.emplace_back(goal.x, goal.y);
-        }
+        // For a partial path the waypoints end at the closest
+        // reachable vertex; the requested goal is deliberately not
+        // appended so the mover stops where retail's move job would
+        // finish rather than grinding on an unreachable waypoint.
+        bool isPartial = path.type == AStarPathType::Partial;
 
         assert(path.path.size() >= 1);
 
         if (path.path.size() == 1)
         {
-            // The path is trivial, we are already at the goal.
-            return UnitPath{std::vector<SimVector>{destination}};
+            // The path is trivial, we are already at the goal
+            // (or at the closest reachable point, for a partial path).
+            return UnitPath{std::vector<SimVector>{isPartial ? unit.position : destination}, isPartial};
         }
 
         auto simplifiedPath = runSimplifyPath(path.path);
@@ -121,9 +142,12 @@ namespace rwe
         {
             waypoints.push_back(getWorldCenter(simulation, DiscreteRect(it->x, it->y, start.width, start.height)));
         }
-        waypoints.back() = destination;
+        if (!isPartial)
+        {
+            waypoints.back() = destination;
+        }
 
-        return UnitPath{std::move(waypoints)};
+        return UnitPath{std::move(waypoints), isPartial};
     }
 
     SimVector PathFindingService::getWorldCenter(const GameSimulation& simulation, const DiscreteRect& rect)

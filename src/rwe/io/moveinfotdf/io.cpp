@@ -11,7 +11,7 @@ namespace rwe
         m.minWaterDepth = block.extractUint("MinWaterDepth").value_or(0);
         m.maxWaterDepth = block.extractUint("MaxWaterDepth").value_or(255);
         m.maxSlope = block.extractUint("MaxSlope").value_or(255);
-        m.maxWaterSlope = block.extractUint("MaxWaterSlope").value_or(m.maxSlope);
+        m.maxWaterSlope = block.extractUint("MaxWaterSlope").value_or(255);
 
         return m;
     }

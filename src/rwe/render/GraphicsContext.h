@@ -5,6 +5,7 @@
 #include <memory>
 #include <rwe/ColorPalette.h>
 #include <rwe/Mesh.h>
+#include <rwe/Viewport.h>
 #include <rwe/geometry/CollisionMesh.h>
 #include <rwe/math/Vector3f.h>
 #include <rwe/render/FrameBufferHandle.h>
@@ -122,9 +123,29 @@ namespace rwe
         FrameBufferHandle frameBuffer;
     };
 
+    /**
+     * Per-frame GL activity counters. Instrumentation only -- cheap
+     * integer increments; consumers snapshot and reset() per frame.
+     */
+    struct RenderStats
+    {
+        std::uint64_t drawCalls{0};
+        std::uint64_t verticesDrawn{0};
+        std::uint64_t textureBinds{0};
+        std::uint64_t programBinds{0};
+        std::uint64_t uniformUpdates{0};
+        std::uint64_t uniformLookups{0};
+        std::uint64_t bufferUploads{0};
+        std::uint64_t bufferBytesUploaded{0};
+
+        void reset() { *this = RenderStats(); }
+    };
+
     class GraphicsContext
     {
     public:
+        RenderStats renderStats;
+
         void clear();
         void clearColor();
 
@@ -197,6 +218,12 @@ namespace rwe
 
         void enableBlending();
 
+        /**
+         * The engine enables blending once at startup and relies on it
+         * staying on for the whole frame -- sprite, UI and cursor draws
+         * do not re-enable it. Disabling mid-frame leaks the state to
+         * every subsequent draw; render passes must not call this.
+         */
         void disableBlending();
 
         UniformLocation getUniformLocation(ShaderProgramIdentifier shader, const std::string& name);
@@ -212,6 +239,16 @@ namespace rwe
         void drawLines(const GlMesh& mesh);
         void drawLineLoop(const GlMesh& mesh);
 
+        /**
+         * Draws `mesh` once per instance record. Instance data layout is
+         * fixed: 144-byte records = mat4 iModel (locations 3-6) +
+         * mat4 iMvp (locations 8-11) + vec4 iParams (location 7). Used by
+         * the instanced unit/shadow/build shaders; attribute state is
+         * restored after the call so the mesh stays usable by the plain
+         * draw paths.
+         */
+        void drawTrianglesInstanced(const GlMesh& mesh, const void* instanceData, std::size_t instanceCount);
+
         Sprite createSprite(const Rectangle2f& bounds, const Rectangle2f& textureRegion, const SharedTextureHandle& texture);
 
         GlMesh createUnitTexturedQuad(const Rectangle2f& textureRegion);
@@ -220,6 +257,18 @@ namespace rwe
 
         void setViewport(int x, int y, int width, int height);
 
+        /**
+         * Enables scissor testing with the given rectangle.
+         * Coordinates are in device pixels with the origin at the
+         * bottom-left of the viewport, as required by glScissor.
+         */
+        void setScissor(int x, int y, int width, int height);
+
+        void clearScissor();
+
+        /** Returns the current GL viewport as x, y, width, height. */
+        Viewport getDeviceViewport() const;
+
         FrameBufferInfo createFrameBuffer(int width, int height);
 
         void bindFrameBufferColorBuffer(TextureIdentifier texture);
@@ -227,8 +276,18 @@ namespace rwe
         void setActiveTextureSlot0();
         void setActiveTextureSlot1();
 
+        /**
+         * Reads the currently bound framebuffer's RGBA pixels into `out`
+         * (bottom-up GL ordering). Used by the screenshot harness.
+         */
+        void readPixelsRGBA(int x, int y, int width, int height, std::vector<unsigned char>& out);
+
     private:
         ShaderHandle compileShader(GLenum shaderType, const std::string& source);
+
+        /** lazily-created streaming VBO for instanced unit draws */
+        VboHandle instancedStreamVbo;
+        std::size_t instancedStreamVboCapacity{0};
 
         VboHandle genBuffer();
         VaoHandle genVertexArray();

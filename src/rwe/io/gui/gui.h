@@ -36,6 +36,18 @@ namespace rwe
         static constexpr unsigned int BehaviorCycle = 256;
     };
 
+    struct GuiCommonAttrib
+    {
+        /**
+         * `commonattribs` bit 3 (value 8): marks a build-picture gadget
+         * as a *weapon* build button rather than a unit build button.
+         * Stockpile units author these (e.g. ARMSILO1.GUI's
+         * ARMMAKENUKE, ARMAMD1.GUI's ARMMAKEANTI); clicking stockpiles
+         * one round of the unit's stockpile weapon.
+         */
+        static constexpr unsigned int WeaponBuildButton = 8;
+    };
+
     const int GuiScrollHorizontalAttrib = 1;
     const int GuiScrollVerticalAttrib = 2;
 
@@ -129,6 +141,7 @@ namespace rwe
         std::optional<int> quickKey;
         std::optional<bool> grayedOut;
         std::optional<int> stages;
+        std::optional<int> maxChars;
 
         bool operator==(const GuiEntry& rhs) const;
 

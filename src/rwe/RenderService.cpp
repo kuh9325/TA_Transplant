@@ -1,7 +1,61 @@
 #include "RenderService.h"
 
+#include <cstdlib>
+#include <cstring>
+#include <unordered_map>
+
 namespace rwe
 {
+    namespace
+    {
+        /**
+         * Groups compatible unit draws for instancing: geometry and the
+         * bound texture must match; everything else varies per instance.
+         */
+        struct UnitInstanceKey
+        {
+            const GlMesh* mesh;
+            TextureIdentifier texture;
+
+            bool operator==(const UnitInstanceKey& other) const
+            {
+                return mesh == other.mesh && texture == other.texture;
+            }
+        };
+
+        struct UnitInstanceKeyHash
+        {
+            std::size_t operator()(const UnitInstanceKey& k) const
+            {
+                return std::hash<const GlMesh*>()(k.mesh)
+                    ^ (std::hash<TextureIdentifier>()(k.texture) << 1);
+            }
+        };
+
+        using UnitInstanceGroups = std::unordered_map<UnitInstanceKey, std::vector<UnitInstanceData>, UnitInstanceKeyHash>;
+
+        UnitInstanceData makeInstanceData(const Matrix4f& modelMatrix, const Matrix4f& mvpMatrix, float p0, float p1, float p2)
+        {
+            UnitInstanceData d;
+            std::memcpy(d.modelMatrix, modelMatrix.data, sizeof(d.modelMatrix));
+            std::memcpy(d.mvpMatrix, mvpMatrix.data, sizeof(d.mvpMatrix));
+            d.params[0] = p0;
+            d.params[1] = p1;
+            d.params[2] = p2;
+            d.params[3] = 0.0f;
+            return d;
+        }
+
+        void drawInstancedGroups(GraphicsContext* graphics, const UnitInstanceGroups& groups)
+        {
+            for (const auto& g : groups)
+            {
+                graphics->bindTexture(g.first.texture);
+                graphics->drawTrianglesInstanced(*g.first.mesh, g.second.data(), g.second.size());
+            }
+        }
+    }
+
     RenderService::RenderService(
         GraphicsContext* graphics,
         ShaderService* shaders,
@@ -10,6 +64,16 @@ namespace rwe
           shaders(shaders),
           viewProjectionMatrix(viewProjectionMatrix)
     {
+        const char* disableInst = std::getenv("RWE_DISABLE_INSTANCING");
+        if (disableInst != nullptr && std::string(disableInst) == "1")
+        {
+            unitInstancingEnabled = false;
+        }
+    }
+
+    void RenderService::setUnitInstancingEnabled(bool enabled)
+    {
+        unitInstancingEnabled = enabled;
     }
 
     void RenderService::drawMapTerrain(const MapTerrainGraphics& terrain, unsigned int x, unsigned int y, unsigned int width, unsigned int height)
@@ -144,7 +208,7 @@ namespace rwe
         {
             const auto& shader = shaders->basicColor;
             graphics->bindShader(shader.handle.get());
-            graphics->setUniformFloat(shader.alpha, 1.0f);
+            graphics->setUniformFloat(shader.alpha, batch.alpha);
             graphics->setUniformMatrix(shader.mvpMatrix, vpMatrix);
             if (!batch.lines.empty())
             {
@@ -155,6 +219,9 @@ namespace rwe
 
             if (!batch.triangles.empty())
             {
+                // blending is permanently enabled at engine startup
+                // (glBlendFunc GL_SRC_ALPHA/GL_ONE_MINUS_SRC_ALPHA);
+                // the batch's alpha uniform alone drives translucency
                 auto mesh = graphics->createColoredMesh(batch.triangles, GL_STREAM_DRAW);
                 graphics->drawTriangles(mesh);
             }
@@ -163,6 +230,12 @@ namespace rwe
 
     void RenderService::drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, float time)
     {
+        if (unitInstancingEnabled)
+        {
+            drawUnitMeshBatchInstanced(batch, seaLevel, time);
+            return;
+        }
+
         if (!batch.buildingMeshes.empty())
         {
             const auto& buildShader = shaders->unitBuild;
@@ -192,6 +265,7 @@ namespace rwe
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformBool(textureShader.shade, m.shaded);
+                graphics->setUniformFloat(textureShader.alpha, m.alpha);
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -200,6 +274,12 @@ namespace rwe
 
     void RenderService::drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch)
     {
+        if (unitInstancingEnabled)
+        {
+            drawUnitShadowMeshBatchInstanced(batch);
+            return;
+        }
+
         if (batch.meshes.empty())
         {
             return;
@@ -222,6 +302,75 @@ namespace rwe
             graphics->bindTexture(m.texture);
             graphics->drawTriangles(*m.mesh);
         }
+
+        graphics->useStencilBufferAsMask();
+        graphics->enableColorBuffer();
+
+        fillScreen(0.0f, 0.0f, 0.0f, 0.5f);
+
+        graphics->enableColorBuffer();
+        graphics->disableStencilBuffer();
+    }
+
+    void RenderService::drawUnitMeshBatchInstanced(const UnitMeshBatch& batch, float seaLevel, float time)
+    {
+        if (!batch.buildingMeshes.empty())
+        {
+            const auto& shader = shaders->unitBuildInstanced;
+            graphics->bindShader(shader.handle.get());
+            // no vpMatrix uniform -- iMvp carries the projection per instance
+            graphics->setUniformFloat(shader.seaLevel, seaLevel);
+            graphics->setUniformFloat(shader.time, time);
+
+            UnitInstanceGroups groups;
+            for (const auto& m : batch.buildingMeshes)
+            {
+                groups[{m.mesh, m.texture}].push_back(makeInstanceData(
+                    m.modelMatrix, m.mvpMatrix, m.shaded ? 1.0f : 0.0f, m.percentComplete, m.unitY));
+            }
+            drawInstancedGroups(graphics, groups);
+        }
+
+        if (!batch.meshes.empty())
+        {
+            const auto& shader = shaders->unitTextureInstanced;
+            graphics->bindShader(shader.handle.get());
+            // no vpMatrix uniform -- iMvp carries the projection per instance
+            graphics->setUniformFloat(shader.seaLevel, seaLevel);
+
+            UnitInstanceGroups groups;
+            for (const auto& m : batch.meshes)
+            {
+                groups[{m.mesh, m.texture}].push_back(makeInstanceData(
+                    m.modelMatrix, m.mvpMatrix, m.shaded ? 1.0f : 0.0f, m.alpha, 0.0f));
+            }
+            drawInstancedGroups(graphics, groups);
+        }
+    }
+
+    void RenderService::drawUnitShadowMeshBatchInstanced(const UnitShadowMeshBatch& batch)
+    {
+        if (batch.meshes.empty())
+        {
+            return;
+        }
+
+        graphics->enableStencilBuffer();
+        graphics->clearStencilBuffer();
+        graphics->useStencilBufferForWrites();
+        graphics->disableColorBuffer();
+
+        const auto& shader = shaders->unitShadowInstanced;
+        graphics->bindShader(shader.handle.get());
+        graphics->setUniformMatrix(shader.vpMatrix, *viewProjectionMatrix);
+
+        UnitInstanceGroups groups;
+        for (const auto& m : batch.meshes)
+        {
+            groups[{m.mesh, m.texture}].push_back(makeInstanceData(
+                m.modelMatrix, m.vpMatrix, m.groundHeight, 0.0f, 0.0f));
+        }
+        drawInstancedGroups(graphics, groups);
 
         graphics->useStencilBufferAsMask();
         graphics->enableColorBuffer();

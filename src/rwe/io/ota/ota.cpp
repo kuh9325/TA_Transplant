@@ -45,10 +45,57 @@ namespace rwe
         tdf.readOrDefault("minwindspeed", r.minWindSpeed);
         tdf.readOrDefault("maxwindspeed", r.maxWindSpeed);
         tdf.readOrDefault("gravity", r.gravity, 112);
+        tdf.readOrDefault("nosealeveltrigger", r.noSeaLevelTrigger);
+        tdf.readOrDefault("waterdoesdamage", r.waterDoesDamage);
+        tdf.readOrDefault("waterdamage", r.waterDamage);
         tdf.readOrDefault("numplayers", r.numPlayers);
         tdf.readOrDefault("size", r.size);
         tdf.readOrDefault("memory", r.memory);
         tdf.readOrDefault("useonlyunits", r.useOnlyUnits);
+        // retail UnitLimit handling: default 250, clamped [20,500]
+        // (TotalA.exe 0x491644 + option clamp)
+        tdf.readOrDefault("maxunits", r.maxUnits, 250);
+        r.maxUnits = std::clamp(r.maxUnits, 20, 500);
+
+        // Mission objectives. Campaign OTAs declare victory/defeat
+        // conditions as GlobalHeader keys; we retain them verbatim.
+        // The key set is fixed by retail: each key name maps to a
+        // VictoryCondition_* or DefeatCondition_* implementation.
+        for (const auto& key : {
+                 // victory-side keys
+                 "KillEnemyCommander",
+                 "DestroyAllUnits",
+                 "KillAllMobileUnits",
+                 "BuildUnitType",
+                 "CaptureUnitType",
+                 "KillAllOfType",
+                 "KillUnitType",
+                 "MoveUnitToRadius",
+                 "UnitTypePassesX",
+                 "UnitTypePassesZ",
+                 "VictoryTimerRunsOut",
+                 // defeat-side keys
+                 "CommanderKilled",
+                 "AllUnitsKilled",
+                 "AllUnitsKilledOfType",
+                 "UnitTypeKilled",
+                 "DeathTimerRunsOut",
+                 "AnyUnitPassesX",
+                 "AnyUnitPassesZ",
+             })
+        {
+            if (auto value = tdf.findValue(key))
+            {
+                OtaMissionObjective objective;
+                objective.type = key;
+                for (auto param : utf8Split(*value, ','))
+                {
+                    utf8Trim(param);
+                    objective.params.push_back(std::move(param));
+                }
+                r.objectives.push_back(std::move(objective));
+            }
+        }
 
         r.schemaCount = tdf.expectInt("SCHEMACOUNT");
 
@@ -114,7 +161,48 @@ namespace rwe
             }
         }
 
+        auto unitsBlockOption = tdf.findBlock("units");
+        if (unitsBlockOption)
+        {
+            auto unitsBlock = &unitsBlockOption->get();
+            unsigned int i = 0;
+            auto block = unitsBlock->findBlock("unit" + std::to_string(i));
+            while (block)
+            {
+                s.units.push_back(parseOtaUnit(*block, i));
+
+                i += 1;
+                block = unitsBlock->findBlock("unit" + std::to_string(i));
+            }
+        }
+
         return s;
+    }
+
+    OtaUnit parseOtaUnit(const TdfBlock& tdf, unsigned int index)
+    {
+        OtaUnit u;
+        u.index = index;
+        tdf.read("Unitname", u.unitName);
+        u.player = tdf.expectUint("Player");
+        tdf.read("XPos", u.xPos);
+        tdf.readOrDefault("YPos", u.yPos);
+        tdf.read("ZPos", u.zPos);
+        u.healthPercentage = tdf.extractUint("HealthPercentage");
+        u.angle = tdf.extractUint("Angle");
+        u.kills = tdf.extractUint("Kills");
+        u.creationCountdown = tdf.extractUint("CreationCountdown");
+        u.initialGroup = tdf.extractUint("InitialGroup");
+        u.immunity = tdf.extractBool("Immunity").value_or(false);
+        u.aiIgnore = tdf.extractBool("AiIgnore").value_or(false);
+
+        // empty InitialMission entries are common in stock data;
+        // retain whatever string is present verbatim
+        u.initialMission = tdf.extract<std::string>("InitialMission").value_or("");
+
+        u.ident = tdf.extract<std::string>("Ident");
+
+        return u;
     }
 
     OtaFeature parseOtaFeature(const TdfBlock& tdf)

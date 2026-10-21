@@ -2,6 +2,7 @@
 
 #include <rwe/cob/CobThread.h>
 #include <rwe/sim/GameTime.h>
+#include <rwe/sim/ProjectileId.h>
 #include <rwe/sim/ProjectilePhysicsType.h>
 #include <rwe/sim/UnitId.h>
 #include <rwe/sim/WeaponDefinition.h>
@@ -13,7 +14,7 @@ namespace rwe
     {
     };
 
-    using UnitWeaponAttackTarget = std::variant<UnitId, SimVector>;
+    using UnitWeaponAttackTarget = std::variant<UnitId, SimVector, ProjectileId>;
 
     struct UnitWeaponStateAttacking
     {
@@ -69,5 +70,11 @@ namespace rwe
 
         /** The internal state of the weapon. */
         UnitWeaponState state{UnitWeaponStateIdle()};
+
+        /**
+         * Rounds of ammunition stockpiled by a build-weapon order.
+         * Only meaningful for weapons whose definition has `stockpile`.
+         */
+        unsigned int stockpileCount{0};
     };
 }

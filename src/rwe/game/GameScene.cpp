@@ -1,23 +1,98 @@
 #include "GameScene.h"
+#include <rwe/sim/Veterancy.h>
 #include <SDL3/SDL_keyboard.h>
 #include <algorithm>
+#include <cstdlib>
+#include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <rwe/CroppedViewport.h>
+#include <rwe/EndMissionScene.h>
+#include <rwe/LoadingScene.h>
+#include <rwe/MainMenuScene.h>
+#include <rwe/util/ConfigFile.h>
+#include <rwe/util/rwe_string.h>
 #include <rwe/Mesh.h>
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
+#include <rwe/game/selection_util.h>
 #include <rwe/resource_io.h>
 #include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/sim/UnitState_util.h>
+#include <rwe/io/campaigntdf/CampaignTdf.h>
+#include <rwe/io/tdf/tdf.h>
+#include <rwe/save/SaveGameService.h>
+#include <rwe/save/SaveListDialog.h>
+#include <rwe/ui/UiLabel.h>
+#include <rwe/ui/UiListBox.h>
+#include <rwe/ui/UiTextBox.h>
 #include <rwe/ui/UiStagedButton.h>
+#include <rwe/ui/UiSurface.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
 #include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
+    namespace
+    {
+        /**
+         * Wall-clock scope timer feeding a nanosecond accumulator.
+         * Null destination = profiling disabled (branch only).
+         */
+        struct ScopedFrameTimer
+        {
+            std::chrono::steady_clock::time_point start;
+            std::uint64_t* out;
+
+            explicit ScopedFrameTimer(std::uint64_t* out)
+                : start(out != nullptr ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{}), out(out)
+            {
+            }
+
+            ~ScopedFrameTimer()
+            {
+                if (out != nullptr)
+                {
+                    *out += static_cast<std::uint64_t>(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - start)
+                            .count());
+                }
+            }
+        };
+
+        /**
+         * Conservative render-only cull bound for a unit centred on its
+         * origin. Covers piece extents, hierarchical animation offsets,
+         * tall structures and partially constructed frames. Generous on
+         * purpose: the cost of a false positive is one emitted unit.
+         */
+        constexpr float unitRenderCullRadius = 320.0f;
+        constexpr float featureRenderCullRadius = 320.0f;
+
+        /**
+         * Shadow-caster visibility test. The shadow shader projects every
+         * vertex onto the terrain at groundHeight, displaced diagonally by
+         * 0.25 * (vertexY - groundHeight) in +x/-z, so the visible shadow
+         * sits near the landing point even when the caster is high above.
+         */
+        bool unitOrShadowInFrustum(const ViewFrustum& frustum, const SimVector& position, float groundHeight, float radius)
+        {
+            const auto p = simVectorToFloat(position);
+            const float heightAbove = p.y - groundHeight;
+            if (heightAbove <= 0.0f)
+            {
+                return sphereInFrustum(frustum, p, radius);
+            }
+            const Vector3f shadowCenter(p.x + 0.25f * heightAbove, groundHeight, p.z - 0.25f * heightAbove);
+            return sphereInFrustum(frustum, shadowCenter, radius + 0.25f * (heightAbove + radius));
+        }
+    }
+
     bool isValidUnitType(const GameSimulation& simulation, const std::string& unitType)
     {
         return simulation.unitDefinitions.find(unitType) != simulation.unitDefinitions.end();
@@ -58,6 +133,74 @@ namespace rwe
         const auto& unit = sim.getUnitState(unitId);
         const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
         return unitDefinition.canAttack;
+    }
+
+    /**
+     * Whether the unit can receive the command-fire (BLAST) order.
+     * Retail admits FBI `candgun` units and units carrying a
+     * `commandfire=1` weapon (stockpile silos); the per-shot resource
+     * cost is checked separately for the cursor.
+     */
+    bool unitCanCommandFire(const GameSimulation& sim, UnitId unitId)
+    {
+        const auto& unit = sim.getUnitState(unitId);
+        const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
+        return unitDefinition.canDGun || unitDefinitionHasCommandFireWeapon(sim.weaponDefinitions, unitDefinition);
+    }
+
+    /**
+     * Retail BLAST cursor eligibility result: the command-fire weapon's
+     * per-shot cost is compared against the owner's stocks when the
+     * unit is `candgun`. The selection-wide cursor takes the minimum
+     * result across selected units.
+     */
+    enum class CommandFireEligibility
+    {
+        Ready,
+        InsufficientResources,
+        Ineligible
+    };
+
+    CommandFireEligibility unitCommandFireEligibility(const GameSimulation& sim, UnitId unitId)
+    {
+        const auto& unit = sim.getUnitState(unitId);
+        const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
+        if (!unitDefinition.canDGun && !unitDefinitionHasCommandFireWeapon(sim.weaponDefinitions, unitDefinition))
+        {
+            return CommandFireEligibility::Ineligible;
+        }
+
+        for (const auto& weapon : unit.weapons)
+        {
+            if (!weapon)
+            {
+                continue;
+            }
+
+            const auto& weaponDefinition = sim.weaponDefinitions.at(weapon->weaponType);
+            if (!weaponDefinition.commandFire)
+            {
+                continue;
+            }
+
+            // a stockpile weapon's cost was paid at build time; firing
+            // only requires a built round
+            if (weaponDefinition.stockpile)
+            {
+                return weapon->stockpileCount > 0
+                    ? CommandFireEligibility::Ready
+                    : CommandFireEligibility::InsufficientResources;
+            }
+
+            const auto& player = sim.getPlayer(unit.owner);
+            if (player.energy >= weaponDefinition.energyPerShot && player.metal >= weaponDefinition.metalPerShot)
+            {
+                return CommandFireEligibility::Ready;
+            }
+            return CommandFireEligibility::InsufficientResources;
+        }
+
+        return CommandFireEligibility::Ineligible;
     }
 
     bool unitCanMove(const GameSimulation& sim, UnitId unitId)
@@ -111,6 +254,124 @@ namespace rwe
         const auto& unit = sim.getUnitState(unitId);
         const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
         return unit.isSelectableBy(unitDefinition, playerId);
+    }
+
+    /**
+     * True when the feature exists, its definition allows reclaiming, and
+     * some of its resource pool remains to be taken.
+     */
+    bool featureIsReclaimableTarget(const GameSimulation& sim, FeatureId featureId)
+    {
+        auto feature = sim.tryGetFeature(featureId);
+        if (!feature)
+        {
+            return false;
+        }
+        const auto& featureDefinition = sim.getFeatureDefinition(feature->get().featureName);
+        return featureDefinition.reclaimable && !sim.reclaimComplete(feature->get());
+    }
+
+    /**
+     * True when the unit exists, is alive, and is not a commander.
+     * Original TA rejects commander targets regardless of ownership
+     * (reclaim targeting is how players identify enemy commanders).
+     * Units still under construction are valid targets but yield
+     * no resources.
+     */
+    bool unitIsReclaimableTarget(const GameSimulation& sim, UnitId unitId)
+    {
+        auto unit = sim.tryGetUnitState(unitId);
+        if (!unit || unit->get().isDead())
+        {
+            return false;
+        }
+        const auto& unitDefinition = sim.unitDefinitions.at(unit->get().unitType);
+        return !unitDefinition.commander;
+    }
+
+    /**
+     * True when the unit may be issued Capture orders — retail gates
+     * the order on the FBI `CanCapture` flag (unitdef bit 0x1000,
+     * TotalA.exe 0x4042cf); in stock data only commanders set it.
+     */
+    bool unitCanCapture(const GameSimulation& sim, UnitId unitId)
+    {
+        auto unit = sim.tryGetUnitState(unitId);
+        return unit && !unit->get().isDead() && sim.unitDefinitions.at(unit->get().unitType).canCapture;
+    }
+
+    /**
+     * True when `targetId` is a valid capture target for `player`'s
+     * unit: alive, construction-complete, not carried, not owned or
+     * allied, and not capture-immune. Retail rejects capture-capable
+     * targets (commanders), unfinished nanoframes and carried units
+     * (TotalA.exe 0x4042e3-0x404342); mission `Immunity=1` units are
+     * untargetable by the same convention weapons use.
+     */
+    bool unitIsCapturableTarget(const GameSimulation& sim, UnitId targetId, PlayerId capturingPlayer)
+    {
+        auto unit = sim.tryGetUnitState(targetId);
+        if (!unit || unit->get().isDead() || unit->get().carriedBy || sim.areAllied(capturingPlayer, unit->get().owner))
+        {
+            return false;
+        }
+        const auto& u = unit->get();
+        const auto& def = sim.unitDefinitions.at(u.unitType);
+        return !def.canCapture && !u.isBeingBuilt(def) && !(u.missionState && u.missionState->immunity);
+    }
+
+    /**
+     * True when the unit may be issued interactive Load orders —
+     * retail gates the order on the FBI `CanLoad` flag (unitdef bit
+     * 0x100, TotalA.exe 0x40679f) and rejects a carrier that is
+     * itself carried (0x411226).
+     */
+    bool unitCanLoad(const GameSimulation& sim, UnitId unitId)
+    {
+        auto unit = sim.tryGetUnitState(unitId);
+        return unit
+            && !unit->get().isDead()
+            && !unit->get().carriedBy
+            && sim.unitDefinitions.at(unit->get().unitType).canLoad;
+    }
+
+    /**
+     * True when `targetId` is a valid interactive Load passenger for
+     * the transport `transportId`: alive, same side, mobile, finished,
+     * transportable (FBI `CantBeTransported` clear), not carried,
+     * not carrying units itself, and within the transport's
+     * `TransportSize` footprint cap and `TransportCapacity` count cap
+     * (TotalA.exe 0x4067cf-0x40681f, 0x4111f0-0x4112a0).
+     */
+    bool unitIsLoadableTarget(const GameSimulation& sim, UnitId targetId, UnitId transportId)
+    {
+        auto unit = sim.tryGetUnitState(targetId);
+        auto transport = sim.tryGetUnitState(transportId);
+        if (!unit || !transport || targetId == transportId)
+        {
+            return false;
+        }
+        const auto& u = unit->get();
+        const auto& t = transport->get();
+        if (u.isDead() || !u.isOwnedBy(t.owner))
+        {
+            return false;
+        }
+        const auto& unitDef = sim.unitDefinitions.at(u.unitType);
+        const auto& transportDef = sim.unitDefinitions.at(t.unitType);
+        if (!unitDef.isMobile
+            || unitDef.cantBeTransported
+            || u.carriedBy
+            || !u.passengers.empty()
+            || u.isBeingBuilt(unitDef))
+        {
+            return false;
+        }
+        if (t.passengers.size() >= transportDef.transportCapacity)
+        {
+            return false;
+        }
+        return sim.getFootprintXZ(unitDef.movementCollisionInfo).first <= transportDef.transportSize;
     }
 
     bool unitIsOwnedByPlayerAndIsBuilder(const GameSimulation& sim, PlayerId playerId, std::optional<UnitId> singleSelectedUnit)
@@ -204,6 +465,13 @@ namespace rwe
 
     const Rectangle2f GameScene::minimapViewport = Rectangle2f::fromTopLeft(0.0f, 0.0f, GuiSizeLeft, GuiSizeLeft);
 
+    /**
+     * The in-game menu dialogs are authored in the stock 640x480 GUI
+     * coordinate space; they render through this viewport scaled to the
+     * window, matching the frontend menu rendering.
+     */
+    const Viewport InGameMenuViewport(0, 0, 640, 480);
+
     GameScene::GameScene(
         const SceneContext& sceneContext,
         std::unique_ptr<PlayerCommandService>&& playerCommandService,
@@ -222,6 +490,7 @@ namespace rwe
         const std::shared_ptr<SpriteSeries>& guiFont,
         PlayerId localPlayerId,
         TdfBlock* audioLookup,
+        const GameParameters& gameParameters,
         std::optional<std::ofstream>&& stateLogStream)
         : sceneContext(sceneContext),
           worldViewport(CroppedViewport(this->sceneContext.viewport, GuiSizeLeft, GuiSizeTop, GuiSizeRight, GuiSizeBottom)),
@@ -232,6 +501,7 @@ namespace rwe
           unitTeamTextureAtlases(std::move(unitTeamTextureAtlases)),
           worldUiRenderService(this->sceneContext.graphics, this->sceneContext.shaders, &this->worldViewport),
           chromeUiRenderService(this->sceneContext.graphics, this->sceneContext.shaders, this->sceneContext.viewport),
+          menuUiRenderService(this->sceneContext.graphics, this->sceneContext.shaders, &InGameMenuViewport),
           simulation(std::move(simulation)),
           terrainGraphics(std::move(terrainGraphics)),
           builderGuisDatabase(std::move(builderGuisDatabase)),
@@ -244,14 +514,120 @@ namespace rwe
           guiFont(guiFont),
           localPlayerId(localPlayerId),
           uiFactory(sceneContext.textureService, sceneContext.audioService, audioLookup, sceneContext.vfs, sceneContext.pathMapping, sceneContext.viewport->width(), sceneContext.viewport->height()),
-          stateLogStream(std::move(stateLogStream))
+          stateLogStream(std::move(stateLogStream)),
+          audioLookup(audioLookup),
+          gameParameters(gameParameters)
     {
+        perfEnabled = std::getenv("RWE_PERF") != nullptr;
+        perfWindowStart = std::chrono::steady_clock::now();
+
+        // RWE_SOAK=<seconds>: run this long then request exit -- for the
+        // progressive-slowdown soak harness. Implies perf reporting.
+        if (const char* soak = std::getenv("RWE_SOAK"))
+        {
+            soakSeconds = static_cast<unsigned int>(std::strtoul(soak, nullptr, 10));
+            perfEnabled = true;
+        }
+        if (perfEnabled)
+        {
+            // note: `simulation` in this ctor body is the moved-from
+            // rvalue-ref parameter; the member needs explicit this->
+            this->simulation.collectTickPhaseTimings = true;
+            perfPfReqBase = this->simulation.pathFindingService.stats.requestsProcessed;
+            perfPfExpBase = this->simulation.pathFindingService.stats.totalExpansions;
+        }
+
+        // RWE_SCENE_BENCH=<count>:<unitType> -- scripted scenario for
+        // live render profiling; implies RWE_PERF reporting
+        if (const char* spec = std::getenv("RWE_SCENE_BENCH"))
+        {
+            std::string s(spec);
+            auto colon = s.find(':');
+            sceneBench.count = static_cast<unsigned int>(std::strtoul(colon == std::string::npos ? s.c_str() : s.substr(0, colon).c_str(), nullptr, 10));
+            sceneBench.unitType = colon == std::string::npos ? std::string("ARMPW") : toUpper(s.substr(colon + 1));
+            // comma-separated type list for the visual matrix; a '~'
+            // suffix leaves the unit under construction so the build
+            // shader path is exercised
+            {
+                std::string types = sceneBench.unitType;
+                std::size_t start = 0;
+                while (start <= types.size())
+                {
+                    auto comma = types.find(',', start);
+                    auto token = types.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+                    if (!token.empty())
+                    {
+                        bool unfinished = token.back() == '~';
+                        if (unfinished)
+                        {
+                            token.pop_back();
+                        }
+                        sceneBench.unitTypes.emplace_back(token, unfinished);
+                    }
+                    if (comma == std::string::npos)
+                    {
+                        break;
+                    }
+                    start = comma + 1;
+                }
+            }
+            // unit type validity is checked at spawn time -- the ctor
+            // runs before unitDefinitions is fully populated
+            sceneBench.active = sceneBench.count > 0;
+            perfEnabled = true;
+        }
+
+        // RWE_DISABLE_CULL=1 bypasses render-side frustum culling so a
+        // single binary can produce culled/unculled A/B screenshots and
+        // benchmarks
+        cullingEnabled = std::getenv("RWE_DISABLE_CULL") == nullptr;
+
+        // RWE_SHOT_DIR=<dir> + RWE_SHOT_TICKS=t1,t2,... capture the world
+        // framebuffer as binary PPM on the first rendered frame after
+        // each listed sim tick. Interpolation is frozen at tick
+        // boundaries so captures are deterministic across runs.
+        if (const char* dir = std::getenv("RWE_SHOT_DIR"))
+        {
+            shotDir = dir;
+            if (const char* ticks = std::getenv("RWE_SHOT_TICKS"))
+            {
+                std::string t(ticks);
+                std::size_t start = 0;
+                while (start <= t.size())
+                {
+                    auto comma = t.find(',', start);
+                    auto token = t.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+                    if (!token.empty())
+                    {
+                        shotTicks.push_back(static_cast<unsigned int>(std::strtoul(token.c_str(), nullptr, 10)));
+                    }
+                    if (comma == std::string::npos)
+                    {
+                        break;
+                    }
+                    start = comma + 1;
+                }
+                std::sort(shotTicks.begin(), shotTicks.end());
+            }
+        }
     }
 
     void GameScene::init()
     {
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
         currentPanel = uiFactory.panelFromGuiFile(sidePrefix + "MAIN2");
+
+        // Restored saves insert units without emitting UnitSpawnedEvent,
+        // so the per-unit GUI state the event normally registers must be
+        // rebuilt from live simulation state before any selection or
+        // panel code queries it. For fresh games this registers the same
+        // values the already-queued spawn events will re-assign.
+        rebuildUnitGuiInfos(simulation, unitGuiInfos);
+
+        // flush track-finish notifications queued while menu scenes
+        // ran; draining here keeps stale channel ids from being
+        // delivered against channels this scene assigns afterwards
+        sceneContext.audioService->dispatchFinishedChannels();
 
         sceneContext.audioService->reserveChannels(reservedChannelsCount);
         gameNetworkService->start();
@@ -289,8 +665,19 @@ namespace rwe
 
     void GameScene::render()
     {
+        ScopedFrameTimer perfTimer(perfEnabled ? &perfRenderNs : nullptr);
+
+        // after the debrief handoff the scene manager still runs one
+        // more render against this scene before swapping; the
+        // simulation is moved-from by then, so skip drawing entirely
+        if (simulationTransferredToDebrief)
+        {
+            return;
+        }
+
         if (guiVisible)
         {
+            ScopedFrameTimer uiTimer(perfEnabled ? &perfUiNs : nullptr);
             renderUi();
         }
 
@@ -299,13 +686,211 @@ namespace rwe
         renderWorld();
         sceneContext.graphics->disableDepthBuffer();
 
+        // deterministic screenshot capture: on each listed tick grab the
+        // world framebuffer as-built, then re-render the identical frame
+        // with culling disabled so culled vs unculled pixels can be
+        // diffed against the same sim state
+        if (shotIndex < shotTicks.size() && simulation.gameTime.value >= shotTicks[shotIndex])
+        {
+            const auto tag = std::to_string(shotTicks[shotIndex]);
+            captureWorldShot(tag);
+            if (cullingEnabled)
+            {
+                cullingEnabled = false;
+                renderWorld();
+                captureWorldShot(tag + "_nocull");
+                cullingEnabled = true;
+            }
+            // third variant: culling on, instancing off -- isolates the
+            // instanced draw path against identical sim state
+            shotInstancingDisabled = true;
+            renderWorld();
+            captureWorldShot(tag + "_noinst");
+            shotInstancingDisabled = false;
+            ++shotIndex;
+        }
+
         // oh yeah also regulate sound
-        std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
-        auto volume = computeSoundVolume(playingUnitChannels.size());
-        for (auto channel : playingUnitChannels)
+        std::vector<int> channels;
+        int volume;
+        {
+            std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
+            channels.assign(playingUnitChannels.begin(), playingUnitChannels.end());
+            volume = computeSoundVolume(playingUnitChannels.size());
+        }
+        // mixer calls must not run while holding playingUnitChannelsLock:
+        // the track-stopped callback takes that lock on the audio thread
+        // while holding a mixer-internal lock, so acquiring a mixer lock
+        // under our lock can deadlock.
+        for (auto channel : channels)
         {
             sceneContext.audioService->setVolume(channel, volume);
         }
+
+        if (inGameMenuOpen())
+        {
+            renderInGameMenu();
+        }
+
+        // igvictory/igdefeat banner: drawn over the world while the
+        // ENDMSN transition delay runs down (retail draws the overlay
+        // every frame the committed flag is set).
+        if (missionResultSprite)
+        {
+            const auto& sprite = *missionResultSprite;
+            float x = worldViewport.x() + (worldViewport.width() - sprite.bounds.width()) / 2.0f;
+            float y = worldViewport.y() + (worldViewport.height() - sprite.bounds.height()) / 2.0f;
+            chromeUiRenderService.drawSpriteAbs(x, y, sprite);
+        }
+
+        if (perfEnabled)
+        {
+            ++perfFrameCount;
+            ++sceneBenchFrame;
+            perfSamples.push_back(PerfSample{perfUpdateNs, perfTickNs, perfRenderNs});
+            perfUpdateNs = perfTickNs = perfRenderNs = 0;
+            auto now = std::chrono::steady_clock::now();
+            auto windowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(now - perfWindowStart).count();
+            if (windowNs >= 5000000000LL && !perfSamples.empty())
+            {
+                reportPerfWindow(static_cast<double>(windowNs) / 1e9);
+            }
+        }
+    }
+
+    void GameScene::reportPerfWindow(double windowS)
+    {
+        double n = static_cast<double>(perfSamples.size());
+        auto pct = [&](std::uint64_t PerfSample::* field, double p) {
+            std::vector<std::uint64_t> v;
+            v.reserve(perfSamples.size());
+            for (const auto& s : perfSamples)
+            {
+                v.push_back(s.*field);
+            }
+            std::sort(v.begin(), v.end());
+            return static_cast<double>(v[static_cast<std::size_t>(p * static_cast<double>(v.size() - 1))]) / 1e6;
+        };
+        // workload accumulation snapshot -- the progressive-slowdown
+        // probe watches these for growth while unit count stays flat
+        std::size_t cobThreads = 0;
+        for (const auto& u : simulation.units)
+        {
+            if (u.second.cobEnvironment)
+            {
+                cobThreads += u.second.cobEnvironment->threads.size();
+            }
+        }
+        std::size_t aiDeadlocks = 0;
+        for (const auto& st : simulation.campaignAi)
+        {
+            aiDeadlocks += st.deadlockedFactories.size();
+        }
+        const auto& pf = simulation.pathFindingService.stats;
+
+        LOG_INFO << "RWE_PERF_SCENE" << (perfWindowLabel.empty() ? "" : " phase=" + perfWindowLabel)
+                 << " frames=" << perfSamples.size()
+                 << " fps=" << (n / windowS)
+                 << " tps=" << (static_cast<double>(perfTicksExec) / windowS)
+                 << " update=[p50 " << pct(&PerfSample::updateNs, 0.50) << " p95 " << pct(&PerfSample::updateNs, 0.95) << " p99 " << pct(&PerfSample::updateNs, 0.99) << " max " << pct(&PerfSample::updateNs, 1.0) << "]"
+                 << " sim=[p50 " << pct(&PerfSample::tickNs, 0.50) << " p99 " << pct(&PerfSample::tickNs, 0.99) << " max " << pct(&PerfSample::tickNs, 1.0) << "]"
+                 << " render=[p50 " << pct(&PerfSample::renderNs, 0.50) << " p95 " << pct(&PerfSample::renderNs, 0.95) << " p99 " << pct(&PerfSample::renderNs, 0.99) << " max " << pct(&PerfSample::renderNs, 1.0) << "]"
+                 << " ticks/frame=" << (static_cast<double>(perfTickCount) / n)
+                 << " accMax=" << perfAccMax
+                 << " tExec=" << perfTicksExec
+                 << " tBlocked=" << perfTicksBlocked
+                 << " rw=[terrain " << (static_cast<double>(perfRwTerrainNs) / 1e6 / n)
+                 << " shadows " << (static_cast<double>(perfRwShadowsNs) / 1e6 / n)
+                 << " unitEmit " << (static_cast<double>(perfRwUnitEmitNs) / 1e6 / n)
+                 << " unitSubmit " << (static_cast<double>(perfRwUnitSubmitNs) / 1e6 / n)
+                 << " fog " << (static_cast<double>(perfRwFogNs) / 1e6 / n)
+                 << " ui " << (static_cast<double>(perfUiNs) / 1e6 / n) << "]"
+                 << " units=" << std::distance(simulation.units.begin(), simulation.units.end())
+                 << " emit=" << (static_cast<double>(perfUnitsEmitted) / n)
+                 << "/" << (static_cast<double>(perfUnitsCulled) / n)
+                 << " shEmit=" << (static_cast<double>(perfShadowsEmitted) / n)
+                 << "/" << (static_cast<double>(perfShadowsCulled) / n)
+                 << " projectiles=" << std::distance(simulation.projectiles.begin(), simulation.projectiles.end())
+                 << " pathQ=" << simulation.pathRequests.size()
+                 << " pfReq+=" << (pf.requestsProcessed - perfPfReqBase)
+                 << " pfExp+=" << (pf.totalExpansions - perfPfExpBase)
+                 << " pfMaxQ=" << pf.maxQueueDepth
+                 << " cobT=" << cobThreads
+                 << " aiDL=" << aiDeadlocks
+                 << " feats=" << std::distance(simulation.features.begin(), simulation.features.end());
+        const auto& pt = simulation.tickPhaseTimings;
+        if (pt.tickCount > 0)
+        {
+            double tn = static_cast<double>(pt.tickCount);
+            LOG_INFO << "RWE_PERF_TICKPHASE ticks=" << pt.tickCount
+                     << " ms/tick=[vis " << (static_cast<double>(pt.visibility) / 1e6 / tn)
+                     << " ai " << (static_cast<double>(pt.campaignAi) / 1e6 / tn)
+                     << " path " << (static_cast<double>(pt.pathfinding) / 1e6 / tn)
+                     << " behave " << (static_cast<double>(pt.unitBehavior) / 1e6 / tn)
+                     << " pieces " << (static_cast<double>(pt.pieces) / 1e6 / tn)
+                     << " cob " << (static_cast<double>(pt.cob) / 1e6 / tn)
+                     << " proj " << (static_cast<double>(pt.projectiles) / 1e6 / tn)
+                     << " dead " << (static_cast<double>(pt.deadUnitCleanup) / 1e6 / tn)
+                     << " res " << (static_cast<double>(pt.resources) / 1e6 / tn) << "]";
+            simulation.tickPhaseTimings.reset();
+        }
+        perfTickCount = perfFrameCount = 0;
+        perfSamples.clear();
+        perfRwTerrainNs = perfRwShadowsNs = perfRwUnitEmitNs = perfRwUnitSubmitNs = perfRwFogNs = perfUiNs = 0;
+        perfUnitsEmitted = perfUnitsCulled = perfShadowsEmitted = perfShadowsCulled = 0;
+        perfAccMax = 0.0f;
+        perfTicksExec = perfTicksBlocked = 0;
+        perfPfReqBase = pf.requestsProcessed;
+        perfPfExpBase = pf.totalExpansions;
+        perfWindowStart = std::chrono::steady_clock::now();
+    }
+
+    void GameScene::enterMissionDebrief()
+    {
+        if (!gameParameters.campaign || !simulation.missionInfo)
+        {
+            // unreachable: missionInfo is only installed for campaign
+            // launches, which always carry campaign parameters
+            sceneContext.sceneManager->requestExit();
+            return;
+        }
+
+        EndMissionInfo info;
+        info.won = missionResultWon;
+        info.campaign = *gameParameters.campaign;
+        info.gameTime = simulation.gameTime;
+        info.killMul = simulation.missionInfo->killMul;
+        info.timeMul = simulation.missionInfo->timeMul;
+
+        auto gameSeconds = static_cast<unsigned int>(simulation.gameTime.value / 30u);
+        for (unsigned int i = 0; i < simulation.players.size(); ++i)
+        {
+            const auto& p = simulation.players[i];
+            DebriefPlayerRow row;
+            row.name = p.name ? *p.name : ("Player " + std::to_string(i + 1));
+            row.kills = static_cast<int>(p.unitsKilled);
+            row.losses = static_cast<int>(p.unitsLost);
+            row.energyProduced = static_cast<int>(p.energyProduced);
+            row.metalProduced = static_cast<int>(p.metalProduced);
+            row.energyExcess = static_cast<int>(p.energyExcess);
+            row.metalExcess = static_cast<int>(p.metalExcess);
+            row.score = debriefScore(row.kills, gameSeconds, info.killMul, info.timeMul);
+            info.stats.push_back(std::move(row));
+        }
+
+        // retail retains the completed game context beneath ENDMSN
+        // (its SaveGame button invokes the ordinary save writer at
+        // 0x4326b0 against that context); hand the finished
+        // simulation and its launch parameters to the debrief scene
+        // rather than tearing them down here
+        auto scene = std::make_unique<EndMissionScene>(
+            sceneContext,
+            audioLookup,
+            info,
+            std::make_unique<GameSimulation>(std::move(simulation)),
+            std::move(gameParameters));
+        simulationTransferredToDebrief = true;
+        sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
     }
 
     void GameScene::renderUi()
@@ -450,6 +1035,11 @@ namespace rwe
 
             if (unit.isOwnedBy(localPlayerId))
             {
+                if (unit.kills != 0)
+                {
+                    chromeUiRenderService.drawTextCenteredX(localSideData.unitName.x1,
+                        extraBottom + localSideData.damageBar.y2 + 2, veteranLabel(unit.kills), *guiFont);
+                }
                 {
                     const auto& rect = localSideData.unitMetalMake;
                     auto text = "+" + formatResourceDelta(unit.getMetalMake());
@@ -477,7 +1067,7 @@ namespace rwe
                 }
             }
         }
-        else if (hoveredFeature)
+        else if (hoveredFeature && simulation.tryGetFeature(*hoveredFeature))
         {
             const auto& feature = simulation.getFeature(*hoveredFeature);
             const auto& featureDefinition = simulation.getFeatureDefinition(feature.featureName);
@@ -489,14 +1079,16 @@ namespace rwe
                 if (featureDefinition.reclaimable)
                 {
                     text += " ";
-                    if (featureDefinition.metal > 0)
+                    auto remainingMetal = featureDefinition.metal - std::min(featureDefinition.metal, feature.reclaimMetalGiven);
+                    auto remainingEnergy = featureDefinition.energy - std::min(featureDefinition.energy, feature.reclaimEnergyGiven);
+                    if (remainingMetal > 0)
                     {
-                        text += " M:" + formatResource(Metal(featureDefinition.metal));
+                        text += " M:" + formatResource(Metal(remainingMetal));
                     }
 
-                    if (featureDefinition.energy > 0)
+                    if (remainingEnergy > 0)
                     {
-                        text += " E:" + formatResource(Energy(featureDefinition.energy));
+                        text += " E:" + formatResource(Energy(remainingEnergy));
                     }
                 }
                 chromeUiRenderService.drawText(rect.x1, extraBottom + rect.y1, text, *guiFont);
@@ -517,6 +1109,16 @@ namespace rwe
                 chromeUiRenderService.drawText(rect.x1, extraBottom + rect.y1, unitDefinition.unitDescription, *guiFont);
             }
         }
+        else if (auto weapon = getStockpileWeaponUnderCursor(); weapon)
+        {
+            // stockpile weapon-build button (GUI commonattribs=8):
+            // retail shows the WEAPON's name and per-shot resource
+            // cost, not a unit build entry
+            const auto& weaponDefinition = simulation.weaponDefinitions.at(*weapon);
+            const auto& rect = localSideData._name;
+            auto text = weaponDefinition.name + "  M:" + formatResource(weaponDefinition.metalPerShot) + " E:" + formatResource(weaponDefinition.energyPerShot);
+            chromeUiRenderService.drawText(rect.x1, extraBottom + rect.y1, text, *guiFont);
+        }
 
         currentPanel->render(chromeUiRenderService);
     }
@@ -529,9 +1131,107 @@ namespace rwe
         auto cameraInverse = computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
         auto worldToMinimap = worldToMinimapMatrix(simulation.terrain, minimapRect);
 
-        // draw minimap dots
-        for (const auto& [_, unit] : simulation.units)
+        // draw minimap fog (darken cells outside LOS)
+        drawMinimapFog();
+
+        // draw selected units' sensor range circles (retail 0x466f70):
+        // radar + sonar in the sensor colour, radar-jam + sonar-jam in
+        // the jam colour, for every selected unit whose active systems
+        // are on (powered-off onoffable units draw nothing)
         {
+            auto mmOrigin = worldToMinimap * Vector3f(0.0f, 0.0f, 0.0f);
+            auto mmUnitX = worldToMinimap * Vector3f(1.0f, 0.0f, 0.0f);
+            auto pxPerWu = Vector2f(mmUnitX.x - mmOrigin.x, mmUnitX.y - mmOrigin.y).length();
+
+            const Vector3f sensorColor(0.35f, 0.50f, 0.85f);
+            const Vector3f jamColor(0.90f, 0.45f, 0.25f);
+            std::vector<GlColoredVertex> rangeLines;
+            for (const auto& [unitId, unit] : simulation.units)
+            {
+                if (!selectedUnits.contains(unitId) || unit.isDead() || unit.carriedBy)
+                {
+                    continue;
+                }
+                const auto& def = simulation.unitDefinitions.at(unit.unitType);
+                if (!GameSimulation::isUnitSensorOn(unit, def))
+                {
+                    continue;
+                }
+                auto center = (worldToMinimap * simVectorToFloat(unit.position)).xy();
+                if (def.radarDistance > 0_ss)
+                {
+                    appendMinimapSensorCircleVertices(rangeLines, center, simScalarToFloat(def.radarDistance) * pxPerWu, sensorColor);
+                }
+                if (def.sonarDistance > 0_ss)
+                {
+                    appendMinimapSensorCircleVertices(rangeLines, center, simScalarToFloat(def.sonarDistance) * pxPerWu, sensorColor);
+                }
+                if (def.radarDistanceJam > 0_ss)
+                {
+                    appendMinimapSensorCircleVertices(rangeLines, center, simScalarToFloat(def.radarDistanceJam) * pxPerWu, jamColor);
+                }
+                if (def.sonarDistanceJam > 0_ss)
+                {
+                    appendMinimapSensorCircleVertices(rangeLines, center, simScalarToFloat(def.sonarDistanceJam) * pxPerWu, jamColor);
+                }
+            }
+            chromeUiRenderService.drawLinesBatch(rangeLines);
+        }
+
+        // anti-missile coverage ring (retail 0x467082): units carrying
+        // the `antiweapons` flag draw each interceptor weapon's
+        // coverage minus 0x200 in the weapon colour while selected
+        {
+            auto mmOrigin = worldToMinimap * Vector3f(0.0f, 0.0f, 0.0f);
+            auto mmUnitX = worldToMinimap * Vector3f(1.0f, 0.0f, 0.0f);
+            auto pxPerWu = Vector2f(mmUnitX.x - mmOrigin.x, mmUnitX.y - mmOrigin.y).length();
+
+            const Vector3f weaponColor(0.45f, 0.85f, 0.55f); // ctx+0xf -- palette index unknown, approximation
+            const auto ringInset = SimScalar(0x200);
+            std::vector<GlColoredVertex> rangeLines;
+            for (const auto& [unitId, unit] : simulation.units)
+            {
+                if (!selectedUnits.contains(unitId) || unit.isDead() || unit.carriedBy)
+                {
+                    continue;
+                }
+                const auto& def = simulation.unitDefinitions.at(unit.unitType);
+                if (!def.antiWeapons || !GameSimulation::isUnitSensorOn(unit, def))
+                {
+                    continue;
+                }
+                auto center = (worldToMinimap * simVectorToFloat(unit.position)).xy();
+                for (const auto& weapon : unit.weapons)
+                {
+                    if (!weapon)
+                    {
+                        continue;
+                    }
+                    const auto& weaponDefinition = simulation.weaponDefinitions.at(weapon->weaponType);
+                    if (!weaponDefinition.interceptor || weaponDefinition.coverage <= ringInset)
+                    {
+                        continue;
+                    }
+                    appendMinimapSensorCircleVertices(rangeLines, center, simScalarToFloat(weaponDefinition.coverage - ringInset) * pxPerWu, weaponColor);
+                }
+            }
+            chromeUiRenderService.drawLinesBatch(rangeLines);
+        }
+
+        // draw minimap dots
+        for (const auto& [unitId, unit] : simulation.units)
+        {
+            if (unit.carriedBy)
+            {
+                continue;
+            }
+            if (!simulation.isDetectedByPlayer(unitId, localPlayerId))
+            {
+                // undetected enemies get no minimap dot; radar contacts
+                // (isDetectedByPlayer but not isLosVisibleToPlayer)
+                // still render as dots
+                continue;
+            }
             auto minimapPos = worldToMinimap * simVectorToFloat(unit.position);
             minimapPos.x = std::floor(minimapPos.x);
             minimapPos.y = std::floor(minimapPos.y);
@@ -564,10 +1264,8 @@ namespace rwe
         }
     }
 
-    void GameScene::renderBuildBoxes(const UnitState& unit, const Color& color)
+    void GameScene::renderBuildBoxes(const UnitState& unit, const Color& color, const Matrix4f& worldToUi, std::vector<GlColoredVertex>& trianglesOut)
     {
-        auto worldToUi = worldUiRenderService.getInverseViewProjectionMatrix()
-            * computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
         for (const auto& order : unit.orders)
         {
             if (const auto buildOrder = std::get_if<BuildOrder>(&order))
@@ -583,7 +1281,8 @@ namespace rwe
                     topLeftWorld.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
 
                 auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
-                worldUiRenderService.drawBoxOutline(
+                appendUiBoxOutlineVertices(
+                    trianglesOut,
                     topLeftUi.x,
                     topLeftUi.y,
                     footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits),
@@ -594,64 +1293,15 @@ namespace rwe
         }
     }
 
-    void GameScene::renderUnitOrders(UnitId unitId, bool drawLines)
+    void GameScene::renderUnitOrders(UnitId unitId, bool drawLines, const Matrix4f& worldToUi, std::vector<GlColoredVertex>& linesOut)
     {
         const auto& unit = getUnit(unitId);
         auto pos = unit.position;
-        auto worldToUi = worldUiRenderService.getInverseViewProjectionMatrix()
-            * computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
         for (const auto& order : unit.orders)
         {
-            auto nextPos = match(
-                order,
-                [&](const BuildOrder& o) { return o.position; },
-                [&](const MoveOrder& o) { return o.destination; },
-                [&](const AttackOrder& o) { return match(
-                                                o.target,
-                                                [&](const SimVector& v) { return v; },
-                                                [&](const UnitId& u) {
-                                                    auto unitOption = tryGetUnit(u);
-                                                    if (!unitOption)
-                                                    {
-                                                        return pos;
-                                                    }
-                                                    return unitOption->get().position;
-                                                }); },
-                [&](const BuggerOffOrder&) { return pos; },
-                [&](const CompleteBuildOrder& o) {
-                    auto unitOption = tryGetUnit(o.target);
-                    if (!unitOption)
-                    {
-                        return pos;
-                    }
-                    return unitOption->get().position;
-                },
-                [&](const GuardOrder& o) {
-                    auto unitOption = tryGetUnit(o.target);
-                    if (!unitOption)
-                    {
-                        return pos;
-                    }
-                    return unitOption->get().position;
-                },
-                [&](const RepairOrder& o) {
-                    auto unitOption = tryGetUnit(o.target);
-                    if (!unitOption)
-                    {
-                        return pos;
-                    }
-                    return unitOption->get().position;
-                });
+            auto nextPos = orderMarkerPosition(simulation, order, pos);
 
-            auto waypointIcon = match(
-                order,
-                [&](const BuildOrder&) { return std::optional<CursorType>(); },
-                [&](const MoveOrder&) { return std::optional<CursorType>(CursorType::Move); },
-                [&](const AttackOrder&) { return std::optional<CursorType>(CursorType::Attack); },
-                [&](const BuggerOffOrder&) { return std::optional<CursorType>(); },
-                [&](const CompleteBuildOrder&) { return std::optional<CursorType>(CursorType::Repair); },
-                [&](const GuardOrder&) { return std::optional<CursorType>(CursorType::Guard); },
-                [&](const RepairOrder&) { return std::optional<CursorType>(CursorType::Repair); });
+            auto waypointIcon = orderMarkerCursorType(order);
 
             // draw waypoint icons
             if (waypointIcon)
@@ -677,13 +1327,29 @@ namespace rwe
                     [&](const BuggerOffOrder&) { return false; },
                     [&](const CompleteBuildOrder&) { return true; },
                     [&](const GuardOrder&) { return true; },
-                    [&](const RepairOrder&) { return true; });
+                    [&](const RepairOrder&) { return true; },
+                    [&](const ReclaimOrder&) { return true; },
+                    [&](const PatrolOrder&) { return true; },
+                    [&](const WaitOrder&) { return false; },
+                    [&](const ParalyzeOrder&) { return false; },
+                    [&](const LandOrder&) { return true; },
+                    [&](const WaitForAttackOrder&) { return false; },
+                    [&](const MakeSelectableOrder&) { return false; },
+                    [&](const AttackUnitTypeOrder&) { return false; },
+                    [&](const MissionBuildOrder&) { return true; },
+                    [&](const MissionFactoryBuildOrder&) { return false; },
+                    [&](const SelfDestructOrder&) { return false; },
+                    [&](const UnloadOrder&) { return true; },
+                    [&](const LoadOrder&) { return true; },
+                    [&](const BuildWeaponOrder&) { return false; },
+                    [&](const CommandFireOrder&) { return false; },
+                    [&](const CaptureOrder&) { return true; });
 
                 if (drawLine)
                 {
                     auto uiPos = worldToUi * simVectorToFloat(pos);
                     auto uiDest = worldToUi * simVectorToFloat(nextPos);
-                    worldUiRenderService.drawLine(uiPos.xy(), uiDest.xy());
+                    appendUiLineVertices(linesOut, uiPos.xy(), uiDest.xy());
                 }
             }
 
@@ -703,11 +1369,19 @@ namespace rwe
         sceneContext.graphics->clear();
 
         const auto& viewProjectionMatrix = computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+        const auto viewFrustum = extractFrustum(viewProjectionMatrix);
         RenderService worldRenderService(sceneContext.graphics, sceneContext.shaders, &viewProjectionMatrix);
+        if (shotInstancingDisabled)
+        {
+            worldRenderService.setUnitInstancingEnabled(false);
+        }
 
         sceneContext.graphics->disableDepthBuffer();
 
-        worldRenderService.drawMapTerrain(terrainGraphics, worldCameraState.getRoundedPosition(), worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
+        {
+            ScopedFrameTimer t(perfEnabled ? &perfRwTerrainNs : nullptr);
+            worldRenderService.drawMapTerrain(terrainGraphics, worldCameraState.getRoundedPosition(), worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
+        }
 
         SpriteBatch flatFeatureBatch;
         SpriteBatch flatFeatureShadowBatch;
@@ -716,6 +1390,10 @@ namespace rwe
             const auto& featureDefinition = simulation.getFeatureDefinition(f.second.featureName);
             if (!featureDefinition.isStanding())
             {
+                if (cullingEnabled && !sphereInFrustum(viewFrustum, simVectorToFloat(f.second.position), featureEventCullRadius(gameMediaDatabase, f.second)))
+                {
+                    continue;
+                }
                 drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, flatFeatureBatch);
                 drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, flatFeatureShadowBatch);
             }
@@ -758,66 +1436,151 @@ namespace rwe
 
         worldRenderService.drawBatch(terrainOverlayBatch, viewProjectionMatrix);
 
-        auto interpolationFraction = static_cast<float>(millisecondsBuffer) / static_cast<float>(SimMillisecondsPerTick);
+        // screenshot mode pins interpolation to the tick boundary so a
+        // given gameTime renders identically regardless of frame pacing
+        auto interpolationFraction = shotTicks.empty()
+            ? tickAccumulator.interpolationFraction()
+            : 0.0f;
         ColoredMeshesBatch selectionRectBatch;
+        ColoredMeshBatch decloakRingBatch;
         for (const auto& selectedUnitId : selectedUnits)
         {
             const auto& unit = getUnit(selectedUnitId);
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+            if (cullingEnabled && !sphereInFrustum(viewFrustum, simVectorToFloat(unit.position), unitRenderCullRadius))
+            {
+                continue;
+            }
             drawSelectionRect(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, interpolationFraction, selectionRectBatch);
+
+            // retail draws the mincloakdistance decloak ring around a
+            // selected unit while it is effectively cloaked (0x4390e2)
+            if (unit.cloaked && unitDefinition.minCloakDistance > 0_ss)
+            {
+                appendDecloakRingVertices(decloakRingBatch.lines, unit, simScalarToFloat(unitDefinition.minCloakDistance), interpolationFraction);
+            }
         }
         worldRenderService.drawLineLoopsBatch(selectionRectBatch);
+        worldRenderService.drawBatch(decloakRingBatch, viewProjectionMatrix);
 
         auto seaLevel = simulation.terrain.getSeaLevel();
 
         UnitShadowMeshBatch unitShadowMeshBatch;
-        for (const auto& [_, unit] : simulation.units)
         {
-            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-            const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
-
-            auto groundHeight = simulation.terrain.getHeightAt(unit.position.x, unit.position.z);
-            if (unitDefinition.floater || unitDefinition.canHover)
+            ScopedFrameTimer t(perfEnabled ? &perfRwShadowsNs : nullptr);
+            for (const auto& [unitId, unit] : simulation.units)
             {
-                groundHeight = rweMax(groundHeight, seaLevel);
-            }
-            drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch);
-        }
-        for (const auto& [_, feature] : simulation.features)
-        {
-            const auto& position = feature.position;
-            auto groundHeight = simulation.terrain.getHeightAt(position.x, position.z);
-            if (position.y >= seaLevel && groundHeight < seaLevel)
-            {
-                groundHeight = seaLevel;
-            }
+                if (unit.carriedBy)
+                {
+                    // cargo inside a transport is not drawn
+                    continue;
+                }
+                if (!simulation.isLosVisibleToPlayer(unitId, localPlayerId))
+                {
+                    // undetected enemies are hidden by fog of war
+                    continue;
+                }
+                const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+                const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
 
-            drawFeatureMeshShadow(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, simScalarToFloat(groundHeight), unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch);
+                auto groundHeight = simulation.terrain.getHeightAt(unit.position.x, unit.position.z);
+                if (unitDefinition.floater || unitDefinition.canHover)
+                {
+                    groundHeight = rweMax(groundHeight, seaLevel);
+                }
+                if (cullingEnabled && !unitOrShadowInFrustum(viewFrustum, unit.position, simScalarToFloat(groundHeight), unitRenderCullRadius))
+                {
+                    ++perfShadowsCulled;
+                    continue;
+                }
+                ++perfShadowsEmitted;
+                drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch);
+            }
+            for (const auto& [_, feature] : simulation.features)
+            {
+                const auto& position = feature.position;
+                auto groundHeight = simulation.terrain.getHeightAt(position.x, position.z);
+                if (position.y >= seaLevel && groundHeight < seaLevel)
+                {
+                    groundHeight = seaLevel;
+                }
+                if (cullingEnabled && !unitOrShadowInFrustum(viewFrustum, position, simScalarToFloat(groundHeight), featureRenderCullRadius))
+                {
+                    continue;
+                }
+
+                drawFeatureMeshShadow(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, simScalarToFloat(groundHeight), unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch);
+            }
+            worldRenderService.drawUnitShadowMeshBatch(unitShadowMeshBatch);
         }
-        worldRenderService.drawUnitShadowMeshBatch(unitShadowMeshBatch);
 
         sceneContext.graphics->enableDepthBuffer();
 
         UnitMeshBatch unitMeshBatch;
-        for (const auto& [_, unit] : simulation.units)
         {
-            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-            const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
-            drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+            ScopedFrameTimer unitEmitTimer(perfEnabled ? &perfRwUnitEmitNs : nullptr);
+            for (const auto& [unitId, unit] : simulation.units)
+            {
+                if (unit.carriedBy)
+                {
+                    // retail draws attached cargo under the carrier's slot
+                    // piece transform (hover deck cargo, VTOL sling load)
+                    const auto carrier = simulation.tryGetUnitState(*unit.carriedBy);
+                    if (!carrier)
+                    {
+                        continue;
+                    }
+                    if (!simulation.isLosVisibleToPlayer(*unit.carriedBy, localPlayerId))
+                    {
+                        continue;
+                    }
+                    const auto& carriedUnitDefinition = simulation.unitDefinitions.at(unit.unitType);
+                    const auto& carriedUnitModelDefinition = simulation.unitModelDefinitions.at(carriedUnitDefinition.objectName);
+                    const auto& carrierUnitDefinition = simulation.unitDefinitions.at(carrier->get().unitType);
+                    const auto& carrierUnitModelDefinition = simulation.unitModelDefinitions.at(carrierUnitDefinition.objectName);
+                    drawAttachedUnit(gameMediaDatabase, viewProjectionMatrix, unit, carriedUnitDefinition, carriedUnitModelDefinition, carrier->get(), carrierUnitModelDefinition, unit.attachSlot, getPlayer(unit.owner).color, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch, unit.cloaked ? 0.5f : 1.0f);
+                    continue;
+                }
+                if (!simulation.isLosVisibleToPlayer(unitId, localPlayerId))
+                {
+                    // undetected enemies are hidden by fog of war
+                    continue;
+                }
+                const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+                const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
+                if (cullingEnabled && !sphereInFrustum(viewFrustum, simVectorToFloat(unit.position), unitRenderCullRadius))
+                {
+                    ++perfUnitsCulled;
+                    continue;
+                }
+                ++perfUnitsEmitted;
+                // a cloaked unit reaching this point is ours (enemy-cloaked
+                // units are filtered by isLosVisibleToPlayer) -- retail
+                // draws it through its ghost/dimmed variant so the owner
+                // still sees it
+                drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch, unit.cloaked ? 0.5f : 1.0f);
+            }
+            for (const auto& [_, feature] : simulation.features)
+            {
+                if (cullingEnabled && !sphereInFrustum(viewFrustum, simVectorToFloat(feature.position), featureRenderCullRadius))
+                {
+                    continue;
+                }
+                drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+            }
         }
-        for (const auto& [_, feature] : simulation.features)
         {
-            drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
-        }
-        worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel), simulation.gameTime.value);
+            ScopedFrameTimer t(perfEnabled ? &perfRwUnitSubmitNs : nullptr);
+            worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel), simulation.gameTime.value);
 
-        ColoredMeshBatch lineProjectilesBatch;
-        SpriteBatch spriteProjectilesBatch;
-        UnitMeshBatch meshProjectilesBatch;
-        drawProjectiles(simulation, gameMediaDatabase, viewProjectionMatrix, simulation.projectiles, simulation.gameTime, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, lineProjectilesBatch, spriteProjectilesBatch, meshProjectilesBatch);
-        worldRenderService.drawBatch(lineProjectilesBatch, viewProjectionMatrix);
-        worldRenderService.drawUnitMeshBatch(meshProjectilesBatch, simScalarToFloat(seaLevel), simulation.gameTime.value);
-        worldRenderService.drawSpriteBatch(spriteProjectilesBatch);
+            ColoredMeshBatch lineProjectilesBatch;
+            SpriteBatch spriteProjectilesBatch;
+            UnitMeshBatch meshProjectilesBatch;
+            drawProjectiles(simulation, gameMediaDatabase, viewProjectionMatrix, simulation.projectiles, simulation.gameTime, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, lineProjectilesBatch, spriteProjectilesBatch, meshProjectilesBatch);
+            worldRenderService.drawBatch(lineProjectilesBatch, viewProjectionMatrix);
+            worldRenderService.drawUnitMeshBatch(meshProjectilesBatch, simScalarToFloat(seaLevel), simulation.gameTime.value);
+            worldRenderService.drawSpriteBatch(spriteProjectilesBatch);
+        }
 
         sceneContext.graphics->disableDepthWrites();
 
@@ -828,6 +1591,10 @@ namespace rwe
             const auto& featureDefinition = simulation.getFeatureDefinition(f.second.featureName);
             if (featureDefinition.isStanding())
             {
+                if (cullingEnabled && !sphereInFrustum(viewFrustum, simVectorToFloat(f.second.position), featureEventCullRadius(gameMediaDatabase, f.second)))
+                {
+                    continue;
+                }
                 drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, featureBatch);
                 drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, featureShadowBatch);
             }
@@ -835,20 +1602,37 @@ namespace rwe
         worldRenderService.drawSpriteBatch(featureShadowBatch);
         worldRenderService.drawSpriteBatch(featureBatch);
 
-        sceneContext.graphics->disableDepthTest();
-        ColoredMeshBatch nanoLinesBatch;
-        for (const auto& [_, unit] : simulation.units)
+        // fog of war: darken terrain outside the local player's LOS.
+        // Unexplored cells go fully black; explored-but-not-visible
+        // cells dim (OTA `mapping` semantics).
+        if (simulation.lineOfSightEnabled && localPlayerId.value < simulation.playerVisibility.size())
         {
-            if (auto nanolatheTarget = unit.getActiveNanolatheTarget())
-            {
-                auto targetUnitOption = tryGetUnit(nanolatheTarget->first);
-                if (targetUnitOption)
-                {
-                    drawNanoLine(simVectorToFloat(nanolatheTarget->second), simVectorToFloat(targetUnitOption->get().position), nanoLinesBatch);
-                }
-            }
+            ScopedFrameTimer t(perfEnabled ? &perfRwFogNs : nullptr);
+            const auto& pv = simulation.playerVisibility[localPlayerId.value];
+            ColoredMeshBatch fogUnexploredBatch;
+            ColoredMeshBatch fogExploredBatch;
+            fogExploredBatch.alpha = 0.55f;
+            fillFogOfWarBatches(
+                worldCameraState.getRoundedPosition(),
+                worldCameraState.scaleDimension(worldViewport.width()),
+                worldCameraState.scaleDimension(worldViewport.height()),
+                simulation.terrain,
+                pv,
+                fogUnexploredBatch,
+                fogExploredBatch);
+            worldRenderService.drawBatch(fogUnexploredBatch, viewProjectionMatrix);
+            worldRenderService.drawBatch(fogExploredBatch, viewProjectionMatrix);
         }
-        worldRenderService.drawBatch(nanoLinesBatch, viewProjectionMatrix);
+
+        sceneContext.graphics->disableDepthTest();
+        // retail's nanolathe spray is a front-most overlay: solid
+        // palette squares, no depth test (TotalA.exe 0x473a00)
+        ColoredMeshBatch nanolatheBatch;
+        for (const auto& particle : particles)
+        {
+            drawNanolatheParticle(simulation, localPlayerId, worldCameraState.scaleDimension(1.0f), particle, nanolatheBatch);
+        }
+        worldRenderService.drawBatch(nanolatheBatch, viewProjectionMatrix);
 
         sceneContext.graphics->bindFrameBufferColorBuffer(dodgeMask.get());
         sceneContext.graphics->clearColor();
@@ -883,6 +1667,14 @@ namespace rwe
 
         sceneContext.graphics->enableDepthWrites();
 
+        // In-world UI overlay geometry (route lines and build-box
+        // outlines) is accumulated into these vectors and streamed to
+        // GL once per frame -- per-primitive meshes were a perf problem.
+        std::vector<GlColoredVertex> overlayLines;
+        std::vector<GlColoredVertex> overlayTriangles;
+        auto worldToUi = worldUiRenderService.getInverseViewProjectionMatrix()
+            * viewProjectionMatrix;
+
         // in-world UI/overlay rendering
         if (isShiftDown())
         {
@@ -893,9 +1685,9 @@ namespace rwe
             {
                 for (const auto& [_, unit] : simulation.units)
                 {
-                    if (unit.isOwnedBy(localPlayerId))
+                    if (unit.isOwnedBy(localPlayerId) && !unit.carriedBy)
                     {
-                        renderBuildBoxes(unit, Color(0, 0, 255));
+                        renderBuildBoxes(unit, Color(0, 0, 255), worldToUi, overlayTriangles);
                     }
                 }
             }
@@ -903,18 +1695,18 @@ namespace rwe
             // draw orders + lines for hovered unit
             if (hoveredUnit && getUnit(*hoveredUnit).isOwnedBy(localPlayerId))
             {
-                renderUnitOrders(*hoveredUnit, true);
+                renderUnitOrders(*hoveredUnit, true, worldToUi, overlayLines);
             }
 
             // draw orders for all selected units
             for (const auto& selectedUnitId : selectedUnits)
             {
-                renderBuildBoxes(getUnit(selectedUnitId), Color(0, 255, 0));
+                renderBuildBoxes(getUnit(selectedUnitId), Color(0, 255, 0), worldToUi, overlayTriangles);
 
                 if (selectedUnitId != hoveredUnit)
                 {
                     // draw lines if only one unit is selected--hovered unit is drawn aleady
-                    renderUnitOrders(selectedUnitId, singleSelectedUnit == selectedUnitId);
+                    renderUnitOrders(selectedUnitId, singleSelectedUnit == selectedUnitId, worldToUi, overlayLines);
                 }
             }
         }
@@ -923,6 +1715,10 @@ namespace rwe
         {
             for (const auto& [_, unit] : simulation.units)
             {
+                if (unit.carriedBy)
+                {
+                    continue;
+                }
                 if (!unit.isOwnedBy(localPlayerId))
                 {
                     // only draw healthbars on units we own
@@ -945,27 +1741,40 @@ namespace rwe
             }
         }
 
-        // Draw build box outline when a unit is selected to be built
-        if (hoverBuildInfo)
-        {
-            Color color = hoverBuildInfo->isValid ? Color(0, 255, 0) : Color(255, 0, 0);
+        // Draw build box outline(s) when a unit is selected to be built.
+        // During an engaged linear-build drag, preview every candidate.
+        auto drawBuildGhost = [&](const DiscreteRect& rect, bool isValid, SimScalar baseY) {
+            Color color = isValid ? Color(0, 255, 0) : Color(255, 0, 0);
 
-            auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(hoverBuildInfo->rect.x, hoverBuildInfo->rect.y);
-            topLeftWorld.y = simulation.terrain.getHeightAt(
-                topLeftWorld.x + ((SimScalar(hoverBuildInfo->rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss),
-                topLeftWorld.z + ((SimScalar(hoverBuildInfo->rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
+            auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(rect.x, rect.y);
+            topLeftWorld.y = baseY;
 
-            auto topLeftUi = worldUiRenderService.getInverseViewProjectionMatrix()
-                * viewProjectionMatrix
-                * simVectorToFloat(topLeftWorld);
-            worldUiRenderService.drawBoxOutline(
+            auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
+            appendUiBoxOutlineVertices(
+                overlayTriangles,
                 topLeftUi.x,
                 topLeftUi.y,
-                hoverBuildInfo->rect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits),
-                hoverBuildInfo->rect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits),
+                rect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits),
+                rect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits),
                 color,
                 2.0f);
+        };
+
+        if (buildDragState && buildDragState->engaged)
+        {
+            for (const auto& candidate : buildDragCandidates)
+            {
+                drawBuildGhost(candidate.rect, candidate.valid, candidate.baseY);
+            }
         }
+        else if (hoverBuildInfo)
+        {
+            drawBuildGhost(hoverBuildInfo->rect, hoverBuildInfo->isValid, hoverBuildInfo->baseY);
+        }
+
+        // stream all accumulated overlay geometry in two draw calls
+        worldUiRenderService.drawLinesBatch(overlayLines);
+        worldUiRenderService.fillColorBatch(overlayTriangles, 255);
 
         // Draw bandbox selection rectangle
         if (auto normalCursorMode = std::get_if<NormalCursorMode>(&cursorMode.getValue()))
@@ -1009,8 +1818,33 @@ namespace rwe
         }
 
         sceneContext.graphics->enableDepthBuffer();
-
         sceneContext.graphics->setViewport(0, 0, sceneContext.viewport->width(), sceneContext.viewport->height());
+    }
+
+    /**
+     * Dumps the world framebuffer to <shotDir>/shot_<name>.ppm.
+     * Called with the world framebuffer still bound.
+     */
+    void GameScene::captureWorldShot(const std::string& name)
+    {
+        auto w = worldViewport.width();
+        auto h = worldViewport.height();
+        std::vector<unsigned char> pixels;
+        sceneContext.graphics->readPixelsRGBA(0, 0, w, h, pixels);
+
+        std::filesystem::create_directories(shotDir);
+        auto path = std::filesystem::path(shotDir) / ("shot_" + name + ".ppm");
+        std::ofstream out(path, std::ios::binary);
+        out << "P6\n" << w << " " << h << "\n255\n";
+        for (int y = h - 1; y >= 0; --y)
+        {
+            for (int x = 0; x < w; ++x)
+            {
+                auto* px = pixels.data() + (static_cast<std::size_t>(y) * w + x) * 4;
+                out.write(reinterpret_cast<const char*>(px), 3);
+            }
+        }
+        LOG_INFO << "RWE_SHOT wrote " << path << " at tick " << simulation.gameTime.value;
     }
 
     const char* stateToString(const UnitBehaviorState& state)
@@ -1025,6 +1859,12 @@ namespace rwe
             },
             [&](const UnitBehaviorStateRepairing&) {
                 return "repairing";
+            },
+            [&](const UnitBehaviorStateReclaiming&) {
+                return "reclaiming";
+            },
+            [&](const UnitBehaviorStateCapturing&) {
+                return "capturing";
             },
             [&](const UnitBehaviorStateCreatingUnit&) {
                 return "creating unit";
@@ -1147,7 +1987,7 @@ namespace rwe
 
     void GameScene::renderDebugWindow()
     {
-        if (!showDebugWindow)
+        if (!showDebugWindow || simulationTransferredToDebrief)
         {
             return;
         }
@@ -1221,41 +2061,168 @@ namespace rwe
 
     void GameScene::onKeyDown(const SDL_KeyboardEvent& keysym)
     {
-        currentPanel->keyDown(KeyEvent(keysym.key));
+        if (inGameMenuOpen())
+        {
+            // a child's activation can pop or close the very dialog
+            // being dispatched to; retire it until this scope unwinds
+            DialogDispatchScope dispatchScope(*this);
 
-        if (keysym.key == SDLK_UP)
+            if (keysym.key == SDLK_F2)
+            {
+                closeInGameMenu();
+                return;
+            }
+
+            auto& topDialog = *inGameMenuDialogs.back();
+            // ESC/Enter on a companion option pane resolve against the
+            // owning screen's defaults (SPEEDSRT has none; PREFS maps
+            // both to its committing PREV button)
+            auto* keyTarget = inGameMenuKeyTarget();
+            if (keyTarget == nullptr)
+            {
+                return;
+            }
+            if (keysym.key == SDLK_ESCAPE)
+            {
+                // stock GUI escdefault names the control Escape
+                // activates; retail resolves it even while a TextBox
+                // owns keyboard focus
+                if (!keyTarget->getEscDefault().empty())
+                {
+                    if (keyTarget->find<UiStagedButton>(keyTarget->getEscDefault()))
+                    {
+                        // activating a control focuses it in retail;
+                        // this also lifts focus off a text entry field
+                        keyTarget->setFocusByName(keyTarget->getEscDefault());
+                        keyTarget->keyDown(KeyEvent(SDLK_SPACE));
+                        return;
+                    }
+                }
+                // no escdefault authored: the key still reaches the
+                // dialog -- a focused TextBox consumes it to drop
+                // focus, an Escape quickkey (e.g. LOADGAME's CANCEL=27)
+                // may fire; if nothing consumed the key it bubbles up
+                // and the dialog pops
+                if (!keyTarget->keyDown(KeyEvent(keysym.key)))
+                {
+                    popInGameMenuDialog();
+                }
+                return;
+            }
+            if (keysym.key == SDLK_RETURN || keysym.key == SDLK_KP_ENTER)
+            {
+                // retail suppresses crdefault while a TextBox owns
+                // keyboard focus (TotalA.exe 0x4a9c80): the focused
+                // gadget consumes Enter to drop focus, and an Enter
+                // quickkey (e.g. LOADGAME's LOAD=13) may fire instead
+                if (keyTarget->keyDown(KeyEvent(keysym.key)))
+                {
+                    return;
+                }
+                // crdefault names the control Enter activates
+                if (!keyTarget->getCrDefault().empty())
+                {
+                    if (keyTarget->find<UiStagedButton>(keyTarget->getCrDefault()))
+                    {
+                        keyTarget->setFocusByName(keyTarget->getCrDefault());
+                        keyTarget->keyDown(KeyEvent(SDLK_SPACE));
+                    }
+                }
+                return;
+            }
+
+            // modified letter/digit chords translate to command codes
+            // in retail and never match a plain-char quickkey
+            if (isModifiedLetterOrDigit(keysym.key))
+            {
+                return;
+            }
+            topDialog.keyDown(KeyEvent(keysym.key));
+            if (keyTarget != &topDialog)
+            {
+                // companion panes share the composite screen's
+                // quickkeys with their owning dialog
+                keyTarget->keyDown(KeyEvent(keysym.key));
+            }
+            return;
+        }
+
+        if (keysym.key == SDLK_F2)
+        {
+            openInGameMenu();
+            return;
+        }
+
+        if (keysym.key == SDLK_F1)
+        {
+            openInGameMenuHelp();
+            return;
+        }
+
+        if (keysym.key == SDLK_PAUSE)
+        {
+            togglePause();
+            return;
+        }
+
+        // retail's key translator (TotalA.exe 0x4c1c70) turns modified
+        // letters/digits into dedicated command codes (Ctrl/Alt+letter
+        // -> 0xaa-0xc3, Ctrl+digit -> 0xc4-0xcd) that never reach GUI
+        // quickkeys; suppress the panel broadcast so e.g. Ctrl+D arms
+        // self-destruct without also firing the `d` order quickkey
+        if (!isModifiedLetterOrDigit(keysym.key))
+        {
+            currentPanel->keyDown(KeyEvent(keysym.key));
+        }
+
+        // SDL3 folds Shift into the keycode for letters ('a'->'A');
+        // retail's letter commands key off the letter regardless of
+        // Shift, so dispatch on the case-folded value
+        const auto key = (keysym.key >= 'A' && keysym.key <= 'Z')
+            ? keysym.key + ('a' - 'A')
+            : keysym.key;
+
+        if (key == SDLK_UP)
         {
             up = true;
         }
-        else if (keysym.key == SDLK_DOWN)
+        else if (key == SDLK_DOWN)
         {
             down = true;
         }
-        else if (keysym.key == SDLK_LEFT)
+        else if (key == SDLK_LEFT)
         {
             left = true;
         }
-        else if (keysym.key == SDLK_RIGHT)
+        else if (key == SDLK_RIGHT)
         {
             right = true;
         }
-        else if (keysym.key == SDLK_ESCAPE)
+        else if (key == SDLK_ESCAPE)
         {
             handleEscapeDown();
         }
-        else if (keysym.key == SDLK_F10)
+        else if (key == SDLK_F10)
         {
             showDebugWindow = true;
+        }
+        else if (key == SDLK_MINUS || keysym.key == SDLK_KP_MINUS)
+        {
+            adjustGameSpeed(-1);
+        }
+        else if (key == SDLK_EQUALS || key == SDLK_PLUS || keysym.key == SDLK_KP_PLUS || keysym.key == SDLK_KP_EQUALS)
+        {
+            adjustGameSpeed(+1);
         }
         else if (keysym.scancode == SDL_SCANCODE_GRAVE)
         {
             healthBarsVisible = !healthBarsVisible;
         }
-        else if (keysym.key == SDLK_T)
+        else if (key == SDLK_T)
         {
             startTrack();
         }
-        else if (keysym.key == SDLK_C)
+        else if (key == SDLK_C)
         {
             if (isCtrlDown())
             {
@@ -1284,11 +2251,77 @@ namespace rwe
                 }
             }
         }
+        else if (key == SDLK_D)
+        {
+            // retail translates Ctrl/Alt+letter to the same command code,
+            // so Ctrl+D and Alt+D both issue SELFDESTRUCT (TotalA.exe
+            // 0x4c1c70, dispatcher 0x495e90 case 0xad -> 0x49641d)
+            if (isCtrlDown() || isAltDown())
+            {
+                // the retail handler snapshots the selection before
+                // toggling each unit's self-destruct command node
+                const std::unordered_set<UnitId> snapshot(selectedUnits);
+                for (const auto& unitId : snapshot)
+                {
+                    localPlayerToggleSelfDestruct(unitId);
+                }
+            }
+        }
+        else if (key == SDLK_A)
+        {
+            if (isCtrlDown() || isAltDown())
+            {
+                selectAllEligibleUnits();
+            }
+        }
+        else if (key == SDLK_S)
+        {
+            if (isCtrlDown() || isAltDown())
+            {
+                selectUnitsOnScreen();
+            }
+        }
+        else if (key == SDLK_Z)
+        {
+            if (isCtrlDown() || isAltDown())
+            {
+                selectUnitsOfSelectedTypes();
+            }
+        }
+        else if (key == SDLK_P)
+        {
+            if (isCtrlDown() || isAltDown())
+            {
+                selectArmedAircraft();
+            }
+        }
+        else if (key == SDLK_R)
+        {
+            if (isCtrlDown() || isAltDown())
+            {
+                selectRadarSonarUnits();
+            }
+        }
+        else if (key == SDLK_W)
+        {
+            if (isCtrlDown() || isAltDown())
+            {
+                selectArmedMobileUnits();
+            }
+        }
     }
 
     void GameScene::onKeyUp(const SDL_KeyboardEvent& keysym)
     {
-        currentPanel->keyUp(KeyEvent(keysym.key));
+        if (inGameMenuOpen())
+        {
+            DialogDispatchScope dispatchScope(*this);
+            inGameMenuDialogs.back()->keyUp(KeyEvent(keysym.key));
+        }
+        else
+        {
+            currentPanel->keyUp(KeyEvent(keysym.key));
+        }
 
         if (keysym.key == SDLK_UP)
         {
@@ -1310,10 +2343,36 @@ namespace rwe
 
     void GameScene::onMouseDown(MouseButtonEvent event)
     {
+        if (inGameMenuOpen())
+        {
+            auto p = toInGameMenuCoordinates(event.x, event.y);
+            event.x = p.x;
+            event.y = p.y;
+            inGameMenuMouseTarget = inGameMenuPointerTarget(event.x, event.y);
+            if (inGameMenuMouseTarget != nullptr)
+            {
+                DialogDispatchScope dispatchScope(*this);
+                inGameMenuMouseTarget->mouseDown(event);
+            }
+            return;
+        }
+
         currentPanel->mouseDown(event);
 
         if (event.button == MouseButtonEvent::MouseButton::Left)
         {
+            // retail: with an armed cursor, shift+click on one of the
+            // selected units' queued order markers (or build ghosts)
+            // removes that order instead of appending a new one
+            if (isShiftDown() && isCursorOverWorld() && tryRemoveQueuedOrderAtCursor())
+            {
+                // a consumed removal click must not leave a latent
+                // build-drag anchor for the later mouse-up
+                buildDragState = std::nullopt;
+                buildDragCandidates.clear();
+                return;
+            }
+
             match(
                 cursorMode.getValue(),
                 [&](const AttackCursorMode&) {
@@ -1417,37 +2476,184 @@ namespace rwe
                         }
                     }
                 },
-                [&](const BuildCursorMode& buildCursor) {
-                    if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit)
+                [&](const ReclaimCursorMode&) {
+                    for (const auto& selectedUnit : selectedUnits)
                     {
-                        if (hoverBuildInfo)
+                        if (hoveredUnit && *hoveredUnit != selectedUnit && unitIsReclaimableTarget(simulation, *hoveredUnit))
                         {
-                            if (hoverBuildInfo->isValid)
+                            if (isShiftDown())
                             {
-                                auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(hoverBuildInfo->rect.x,
-                                    hoverBuildInfo->rect.y);
-                                auto x = topLeftWorld.x + ((SimScalar(hoverBuildInfo->rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
-                                auto z = topLeftWorld.z + ((SimScalar(hoverBuildInfo->rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
-                                auto y = simulation.terrain.getHeightAt(x, z);
-                                SimVector buildPos(x, y, z);
-                                if (isShiftDown())
-                                {
-                                    localPlayerEnqueueUnitOrder(*selectedUnit, BuildOrder(buildCursor.unitType, buildPos));
-                                }
-                                else
-                                {
-                                    localPlayerIssueUnitOrder(*selectedUnit, BuildOrder(buildCursor.unitType, buildPos));
-                                    cursorMode.next(NormalCursorMode());
-                                }
+                                localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredUnit));
                             }
                             else
                             {
-                                if (sounds.notOkToBuild)
+                                localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredUnit));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                        else if (hoveredFeature && featureIsReclaimableTarget(simulation, *hoveredFeature))
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                    }
+                },
+                [&](const PatrolCursorMode&) {
+                    if (auto coord = getMouseTerrainCoordinate(); coord)
+                    {
+                        for (const auto& selectedUnit : selectedUnits)
+                        {
+                            auto unit = tryGetUnit(selectedUnit);
+                            if (!unit || !simulation.unitDefinitions.at(unit->get().unitType).canPatrol)
+                            {
+                                continue;
+                            }
+
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, PatrolOrder({*coord}));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, PatrolOrder({*coord}));
+                            }
+                        }
+
+                        if (!isShiftDown())
+                        {
+                            cursorMode.next(NormalCursorMode());
+                        }
+                    }
+                },
+                [&](const CommandFireCursorMode&) {
+                    // retail issues ATTACKSPECIAL per selected `candgun`
+                    // unit; the per-shot resource check is cursor-level
+                    // only and does not gate the click
+                    for (const auto& selectedUnit : selectedUnits)
+                    {
+                        if (!unitCanCommandFire(simulation, selectedUnit))
+                        {
+                            continue;
+                        }
+
+                        if (hoveredUnit)
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, CommandFireOrder(*hoveredUnit));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, CommandFireOrder(*hoveredUnit));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                        else
+                        {
+                            auto coord = getMouseTerrainCoordinate();
+                            if (coord)
+                            {
+                                if (isShiftDown())
                                 {
-                                    playUiSound(*sounds.notOkToBuild);
+                                    localPlayerEnqueueUnitOrder(selectedUnit, CommandFireOrder(*coord));
+                                }
+                                else
+                                {
+                                    localPlayerIssueUnitOrder(selectedUnit, CommandFireOrder(*coord));
+                                    cursorMode.next(NormalCursorMode());
                                 }
                             }
                         }
+                    }
+                },
+                [&](const CaptureCursorMode&) {
+                    // retail issues the capture order per eligible
+                    // (CanCapture) unit; ineligible units ignore the
+                    // click (TotalA.exe 0x4042cf)
+                    for (const auto& selectedUnit : selectedUnits)
+                    {
+                        auto unit = tryGetUnit(selectedUnit);
+                        if (unit && hoveredUnit && *hoveredUnit != selectedUnit
+                            && unitCanCapture(simulation, selectedUnit)
+                            && unitIsCapturableTarget(simulation, *hoveredUnit, unit->get().owner))
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, CaptureOrder(*hoveredUnit));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, CaptureOrder(*hoveredUnit));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                    }
+                },
+                [&](const LoadCursorMode&) {
+                    // retail mode 6: each selected CanLoad transport is
+                    // ordered to pick up the clicked friendly unit;
+                    // ineligible targets silently ignore the click
+                    for (const auto& selectedUnit : selectedUnits)
+                    {
+                        if (hoveredUnit && *hoveredUnit != selectedUnit
+                            && unitCanLoad(simulation, selectedUnit)
+                            && unitIsLoadableTarget(simulation, *hoveredUnit, selectedUnit))
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, LoadOrder(*hoveredUnit));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, LoadOrder(*hoveredUnit));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                    }
+                },
+                [&](const UnloadCursorMode&) {
+                    // retail mode 5: each selected transport carrying
+                    // cargo gets the shared Ground_Unload/VTOL_Unload
+                    // order for the clicked destination
+                    auto coord = getMouseTerrainCoordinate();
+                    if (!coord)
+                    {
+                        return;
+                    }
+                    for (const auto& selectedUnit : selectedUnits)
+                    {
+                        auto unit = tryGetUnit(selectedUnit);
+                        if (unit
+                            && unitCanLoad(simulation, selectedUnit)
+                            && !unit->get().passengers.empty())
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, UnloadOrder(*coord));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, UnloadOrder(*coord));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                    }
+                },
+                [&](const BuildCursorMode& buildCursor) {
+                    // linear-build QoL: placement is deferred to
+                    // mouse-up so a drag can become a line of sites;
+                    // a same-cell click still places exactly one
+                    if (getSingleSelectedUnit() && hoverBuildInfo)
+                    {
+                        buildDragState = BuildDragState{buildCursor.unitType, hoverBuildInfo->rect};
+                        buildDragCandidates.clear();
                     }
                 },
                 [&](const NormalCursorMode&) {
@@ -1533,7 +2739,27 @@ namespace rwe
                 [&](const RepairCursorMode&) {
                     cursorMode.next(NormalCursorMode());
                 },
+                [&](const ReclaimCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
+                [&](const PatrolCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
+                [&](const CommandFireCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
+                [&](const CaptureCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
+                [&](const LoadCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
+                [&](const UnloadCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
                 [&](const BuildCursorMode&) {
+                    buildDragState = std::nullopt;
+                    buildDragCandidates.clear();
                     cursorMode.next(NormalCursorMode());
                 },
                 [&](const NormalCursorMode&) {
@@ -1556,7 +2782,22 @@ namespace rwe
                             {
                                 if (isEnemy(*hoveredUnit))
                                 {
-                                    if (isShiftDown())
+                                    // a builder without weapons reclaims enemy units contextually;
+                                    // armed units (including commanders) keep attack precedence
+                                    if (unitIsBuilder(simulation, selectedUnit)
+                                        && !unitCanAttack(simulation, selectedUnit)
+                                        && unitIsReclaimableTarget(simulation, *hoveredUnit))
+                                    {
+                                        if (isShiftDown())
+                                        {
+                                            localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredUnit));
+                                        }
+                                        else
+                                        {
+                                            localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredUnit));
+                                        }
+                                    }
+                                    else if (isShiftDown())
                                     {
                                         localPlayerEnqueueUnitOrder(selectedUnit, AttackOrder(*hoveredUnit));
                                     }
@@ -1580,6 +2821,26 @@ namespace rwe
                                             localPlayerIssueUnitOrder(selectedUnit, CompleteBuildOrder(*hoveredUnit));
                                         }
                                     }
+                                    else if (ud.isAirBase && simulation.unitDefinitions.at(getUnit(selectedUnit).unitType).canFly)
+                                    {
+                                        if (isShiftDown()) { localPlayerEnqueueUnitOrder(selectedUnit, LandOrder(*hoveredUnit)); }
+                                        else { localPlayerIssueUnitOrder(selectedUnit, LandOrder(*hoveredUnit)); }
+                                    }
+                                    else if (unitCanLoad(simulation, selectedUnit)
+                                        && unitIsLoadableTarget(simulation, *hoveredUnit, selectedUnit))
+                                    {
+                                        // retail preferred action: a
+                                        // transport right-clicking a
+                                        // loadable friendly unit loads it
+                                        if (isShiftDown())
+                                        {
+                                            localPlayerEnqueueUnitOrder(selectedUnit, LoadOrder(*hoveredUnit));
+                                        }
+                                        else
+                                        {
+                                            localPlayerIssueUnitOrder(selectedUnit, LoadOrder(*hoveredUnit));
+                                        }
+                                    }
                                     else if (u.hitPoints < ud.maxHitPoints && unitIsBuilder(simulation, selectedUnit))
                                     {
                                         if (isShiftDown())
@@ -1591,6 +2852,33 @@ namespace rwe
                                             localPlayerIssueUnitOrder(selectedUnit, RepairOrder(*hoveredUnit));
                                         }
                                     }
+                                    else if (unitCanGuard(simulation, selectedUnit))
+                                    {
+                                        // retail right-click on a
+                                        // healthy friendly unit issues
+                                        // Guard (the Green cursor
+                                        // context); it previously fell
+                                        // through to Move
+                                        if (isShiftDown())
+                                        {
+                                            localPlayerEnqueueUnitOrder(selectedUnit, GuardOrder(*hoveredUnit));
+                                        }
+                                        else
+                                        {
+                                            localPlayerIssueUnitOrder(selectedUnit, GuardOrder(*hoveredUnit));
+                                        }
+                                    }
+                                }
+                            }
+                            else if (hoveredFeature && unitIsBuilder(simulation, selectedUnit) && featureIsReclaimableTarget(simulation, *hoveredFeature))
+                            {
+                                if (isShiftDown())
+                                {
+                                    localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
+                                }
+                                else
+                                {
+                                    localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
                                 }
                             }
                             else
@@ -1620,6 +2908,22 @@ namespace rwe
 
     void GameScene::onMouseUp(MouseButtonEvent event)
     {
+        if (inGameMenuOpen())
+        {
+            auto p = toInGameMenuCoordinates(event.x, event.y);
+            event.x = p.x;
+            event.y = p.y;
+            // release goes to the dialog that took the press so a
+            // button armed in a companion pane resolves correctly
+            if (inGameMenuMouseTarget != nullptr)
+            {
+                DialogDispatchScope dispatchScope(*this);
+                inGameMenuMouseTarget->mouseUp(event);
+                inGameMenuMouseTarget = nullptr;
+            }
+            return;
+        }
+
         currentPanel->mouseUp(event);
 
         if (event.button == MouseButtonEvent::MouseButton::Left)
@@ -1646,6 +2950,27 @@ namespace rwe
                                     && isFriendly(*hoveredUnit)
                                     && unitNeedsRepair(simulation, *hoveredUnit);
 
+                                // In left-click mode, a reclaimable enemy unit under a
+                                // weaponless-builder selection presents the Reclaim context.
+                                // Armed selections keep the attack context, and friendly
+                                // units keep selection/repair so reclaim never eats clicks.
+                                bool reclaimUnitContext = !repairContext
+                                    && leftClickMode()
+                                    && hoveredUnit
+                                    && isEnemy(*hoveredUnit)
+                                    && unitIsReclaimableTarget(simulation, *hoveredUnit)
+                                    && std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id) && !unitCanAttack(simulation, id); });
+
+                                // In left-click mode, a reclaimable feature under a builder
+                                // selection presents the Reclaim context -- the click reclaims
+                                // the feature rather than issuing a move.
+                                bool reclaimContext = !repairContext
+                                    && !reclaimUnitContext
+                                    && leftClickMode()
+                                    && hoveredFeature
+                                    && featureIsReclaimableTarget(simulation, *hoveredFeature)
+                                    && std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); });
+
                                 if (repairContext)
                                 {
                                     for (const auto& selectedUnit : selectedUnits)
@@ -1661,6 +2986,42 @@ namespace rwe
                                         else
                                         {
                                             localPlayerIssueUnitOrder(selectedUnit, RepairOrder(*hoveredUnit));
+                                        }
+                                    }
+                                }
+                                else if (reclaimUnitContext)
+                                {
+                                    for (const auto& selectedUnit : selectedUnits)
+                                    {
+                                        if (!unitIsBuilder(simulation, selectedUnit) || unitCanAttack(simulation, selectedUnit))
+                                        {
+                                            continue;
+                                        }
+                                        if (isShiftDown())
+                                        {
+                                            localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredUnit));
+                                        }
+                                        else
+                                        {
+                                            localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredUnit));
+                                        }
+                                    }
+                                }
+                                else if (reclaimContext)
+                                {
+                                    for (const auto& selectedUnit : selectedUnits)
+                                    {
+                                        if (!unitIsBuilder(simulation, selectedUnit))
+                                        {
+                                            continue;
+                                        }
+                                        if (isShiftDown())
+                                        {
+                                            localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
+                                        }
+                                        else
+                                        {
+                                            localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
                                         }
                                     }
                                 }
@@ -1748,6 +3109,10 @@ namespace rwe
                         [&](const NormalCursorMode::UpState&) {
                         });
                 },
+                [&](const BuildCursorMode& buildCursor) {
+                    // linear-build QoL: placement deferred from mouse-down
+                    completeBuildPlacement(buildCursor.unitType);
+                },
                 [&](const auto&) {
                     // do nothing
                 });
@@ -1804,6 +3169,20 @@ namespace rwe
 
     void GameScene::onMouseMove(MouseMoveEvent event)
     {
+        if (inGameMenuOpen())
+        {
+            sceneContext.cursor->useCursor(CursorType::Normal);
+            auto p = toInGameMenuCoordinates(event.x, event.y);
+            event.x = p.x;
+            event.y = p.y;
+            if (auto target = inGameMenuPointerTarget(event.x, event.y))
+            {
+                DialogDispatchScope dispatchScope(*this);
+                target->mouseMove(event);
+            }
+            return;
+        }
+
         if (auto middleMousePanningState = std::get_if<CameraControlStateMiddleMousePan>(&cameraControlState); middleMousePanningState)
         {
             auto cameraConstraint = computeCameraConstraint(simulation.terrain, worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
@@ -1823,12 +3202,62 @@ namespace rwe
 
     void GameScene::onMouseWheel(MouseWheelEvent event)
     {
+        if (inGameMenuOpen())
+        {
+            DialogDispatchScope dispatchScope(*this);
+            inGameMenuDialogs.back()->mouseWheel(event);
+            return;
+        }
+
         currentPanel->mouseWheel(event);
+    }
+
+    GameScene::~GameScene()
+    {
+        // channelFinished is app-lifetime while this callback captures
+        // `this`; dropping the unique_ptr alone leaks the subscription
+        // and the audio dispatch would invoke a dead GameScene.
+        audioSub->unsubscribe();
     }
 
     void GameScene::update(int millisecondsElapsed)
     {
-        millisecondsBuffer += millisecondsElapsed;
+        ScopedFrameTimer perfTimer(perfEnabled ? &perfUpdateNs : nullptr);
+
+        const auto networkStatus = gameNetworkService->getStatus();
+        if (networkStatus == GameNetworkService::Status::Failed || networkStatus == GameNetworkService::Status::Stopped)
+        {
+            throw std::runtime_error("Game network service stopped: " + gameNetworkService->getFailureReason());
+        }
+
+        updateSceneBench();
+
+        sceneContext.audioService->dispatchFinishedChannels();
+
+        tickAccumulator.addElapsed(millisecondsElapsed, gameSpeedLevel);
+
+        // soak auto-exit (RWE_SOAK); requestExit is async-safe to call
+        // from update -- SceneManager checks it at the top of the loop
+        if (soakSeconds > 0)
+        {
+            if (!soakStarted)
+            {
+                soakStarted = true;
+                soakStart = std::chrono::steady_clock::now();
+            }
+            else if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - soakStart).count() >= static_cast<long long>(soakSeconds))
+            {
+                LOG_INFO << "RWE_SOAK " << soakSeconds << "s elapsed, exiting";
+                sceneContext.sceneManager->requestExit();
+                soakSeconds = 0;
+            }
+        }
+
+        if (inGameMenuOpen())
+        {
+            DialogDispatchScope dispatchScope(*this);
+            inGameMenuDialogs.back()->update(static_cast<float>(millisecondsElapsed) / 1000.0f);
+        }
 
         auto cameraConstraint = computeCameraConstraint(simulation.terrain, worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
 
@@ -1844,6 +3273,9 @@ namespace rwe
         }
 
         // update camera position from edge scroll
+        // (suppressed while the in-game menu is open; the cursor may be
+        // parked at a screen edge over a menu dialog)
+        if (!inGameMenuOpen())
         {
             auto mousePosition = getMousePosition();
             auto directionX = mousePosition.x == sceneContext.viewport->left()
@@ -1939,29 +3371,72 @@ namespace rwe
         hoveredUnit = getUnitUnderCursor();
         hoveredFeature = getFeatureUnderCursor();
 
-        if (auto buildCursor = std::get_if<BuildCursorMode>(&cursorMode.getValue()); buildCursor != nullptr && isCursorOverWorld())
+        if (auto buildCursor = std::get_if<BuildCursorMode>(&cursorMode.getValue()); buildCursor != nullptr)
         {
-            auto ray = screenToWorldRayUtil(computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height()), screenToWorldClipSpace(getMousePosition()));
-            auto intersect = simulation.intersectLineWithTerrain(floatToSimLine(ray.toLine()));
-
-            if (intersect)
+            if (isCursorOverWorld())
             {
-                const auto& unitType = buildCursor->unitType;
-                const auto& pos = *intersect;
-                const auto& unitDefinition = simulation.unitDefinitions.at(unitType);
-                auto mc = simulation.getAdHocMovementClass(unitDefinition.movementCollisionInfo);
-                auto footprintRect = simulation.computeFootprintRegion(pos, unitDefinition.movementCollisionInfo);
-                auto isValid = simulation.canBeBuiltAt(mc, unitDefinition.yardMap, unitDefinition.yardMapContainsGeo, footprintRect.x, footprintRect.y);
-                hoverBuildInfo = HoverBuildInfo{footprintRect, isValid};
+                auto ray = screenToWorldRayUtil(computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height()), screenToWorldClipSpace(getMousePosition()));
+                auto intersect = simulation.intersectLineWithTerrain(floatToSimLine(ray.toLine()));
+
+                if (intersect)
+                {
+                    const auto& unitType = buildCursor->unitType;
+                    const auto& pos = *intersect;
+                    const auto& unitDefinition = simulation.unitDefinitions.at(unitType);
+                    auto mc = simulation.getAdHocMovementClass(unitDefinition.movementCollisionInfo);
+                    auto footprintRect = simulation.computeFootprintRegion(pos, unitDefinition.movementCollisionInfo);
+                    auto placement = simulation.computeBuildingPlacement(mc, unitDefinition.yardMap, unitDefinition.yardMapContainsGeo, unitDefinition.waterline, footprintRect.x, footprintRect.y);
+                    hoverBuildInfo = HoverBuildInfo{footprintRect, placement && placement->valid, placement ? placement->baseY : pos.y};
+
+                    // linear-build QoL: while a drag anchor is live,
+                    // evaluate every line cell for preview and release
+                    if (buildDragState && buildDragState->unitType == unitType)
+                    {
+                        Point cursorCell(footprintRect.x, footprintRect.y);
+                        if (cursorCell != Point(buildDragState->anchorRect.x, buildDragState->anchorRect.y))
+                        {
+                            buildDragState->engaged = true;
+                        }
+                        buildDragCandidates.clear();
+                        for (const auto& cell : linearBuildCells(Point(buildDragState->anchorRect.x, buildDragState->anchorRect.y), cursorCell, footprintRect.width, footprintRect.height))
+                        {
+                            auto candidatePlacement = simulation.computeBuildingPlacement(mc, unitDefinition.yardMap, unitDefinition.yardMapContainsGeo, unitDefinition.waterline, cell.x, cell.y);
+                            auto candidateCorner = simulation.terrain.heightmapIndexToWorldCorner(cell.x, cell.y);
+                            auto candidateCenterX = candidateCorner.x + ((SimScalar(footprintRect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
+                            auto candidateCenterZ = candidateCorner.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
+                            auto candidateBaseY = (candidatePlacement && candidatePlacement->valid)
+                                ? candidatePlacement->baseY
+                                : simulation.terrain.getHeightAt(candidateCenterX, candidateCenterZ);
+                            buildDragCandidates.push_back(BuildDragCandidate{
+                                DiscreteRect(cell.x, cell.y, footprintRect.width, footprintRect.height),
+                                candidatePlacement && candidatePlacement->valid,
+                                candidateBaseY});
+                        }
+                    }
+                    else
+                    {
+                        // armed unit type changed mid-drag -> drop the anchor
+                        buildDragState = std::nullopt;
+                        buildDragCandidates.clear();
+                    }
+                }
+                else
+                {
+                    hoverBuildInfo = std::nullopt;
+                    buildDragCandidates.clear();
+                }
             }
             else
             {
                 hoverBuildInfo = std::nullopt;
+                buildDragCandidates.clear();
             }
         }
         else
         {
             hoverBuildInfo = std::nullopt;
+            buildDragState = std::nullopt;
+            buildDragCandidates.clear();
         }
 
         if (!isCursorOverMinimap() && !isCursorOverWorld())
@@ -1985,6 +3460,55 @@ namespace rwe
                 [&](const RepairCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Repair);
                 },
+                [&](const ReclaimCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Reclaim);
+                },
+                [&](const PatrolCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Patrol);
+                },
+                [&](const CommandFireCursorMode&) {
+                    // retail picks the cursor from the minimum
+                    // eligibility result across the selection:
+                    // airstrike when a unit can fire, capture when the
+                    // eligible units lack the per-shot resources,
+                    // hourglass when nothing can fire
+                    auto eligibility = CommandFireEligibility::Ineligible;
+                    for (const auto& selectedUnit : selectedUnits)
+                    {
+                        auto e = unitCommandFireEligibility(simulation, selectedUnit);
+                        if (e == CommandFireEligibility::Ready)
+                        {
+                            eligibility = e;
+                            break;
+                        }
+                        if (e == CommandFireEligibility::InsufficientResources)
+                        {
+                            eligibility = e;
+                        }
+                    }
+
+                    switch (eligibility)
+                    {
+                        case CommandFireEligibility::Ready:
+                            sceneContext.cursor->useCursor(CursorType::CommandFire);
+                            break;
+                        case CommandFireEligibility::InsufficientResources:
+                            sceneContext.cursor->useCursor(CursorType::Capture);
+                            break;
+                        default:
+                            sceneContext.cursor->useCursor(CursorType::Hourglass);
+                            break;
+                    }
+                },
+                [&](const CaptureCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Capture);
+                },
+                [&](const LoadCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Load);
+                },
+                [&](const UnloadCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Unload);
+                },
                 [&](const BuildCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Normal);
                 },
@@ -2005,10 +3529,25 @@ namespace rwe
                         {
                             sceneContext.cursor->useCursor(CursorType::Attack);
                         }
+                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id) && !unitCanAttack(simulation, id); })
+                            && hoveredUnit && isEnemy(*hoveredUnit) && unitIsReclaimableTarget(simulation, *hoveredUnit))
+                        {
+                            sceneContext.cursor->useCursor(CursorType::Reclaim);
+                        }
                         else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); })
                             && hoveredUnit && unitIsBeingBuilt(simulation, *hoveredUnit))
                         {
                             sceneContext.cursor->useCursor(CursorType::Repair);
+                        }
+                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); })
+                            && hoveredFeature && featureIsReclaimableTarget(simulation, *hoveredFeature))
+                        {
+                            sceneContext.cursor->useCursor(CursorType::Reclaim);
+                        }
+                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitCanLoad(simulation, id); })
+                            && hoveredUnit && std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitCanLoad(simulation, id) && unitIsLoadableTarget(simulation, *hoveredUnit, id); }))
+                        {
+                            sceneContext.cursor->useCursor(CursorType::Load);
                         }
                         else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitCanMove(simulation, id); }))
                         {
@@ -2035,6 +3574,11 @@ namespace rwe
                         {
                             sceneContext.cursor->useCursor(CursorType::Red);
                         }
+                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id) && !unitCanAttack(simulation, id); })
+                            && hoveredUnit && isEnemy(*hoveredUnit) && unitIsReclaimableTarget(simulation, *hoveredUnit))
+                        {
+                            sceneContext.cursor->useCursor(CursorType::Reclaim);
+                        }
                         else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); })
                             && hoveredUnit && isFriendly(*hoveredUnit) && unitIsBeingBuilt(simulation, *hoveredUnit))
                         {
@@ -2045,6 +3589,11 @@ namespace rwe
                         {
                             sceneContext.cursor->useCursor(CursorType::Green);
                         }
+                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); })
+                            && hoveredFeature && featureIsReclaimableTarget(simulation, *hoveredFeature))
+                        {
+                            sceneContext.cursor->useCursor(CursorType::Reclaim);
+                        }
                         else
                         {
                             sceneContext.cursor->useCursor(CursorType::Normal);
@@ -2053,14 +3602,13 @@ namespace rwe
                 });
         }
 
-        auto maxRtt = std::clamp(gameNetworkService->getMaxAverageRttMillis(), 16.0f, 2000.0f);
-        auto highCommandLatencyMillis = maxRtt + (maxRtt / 4.0f) + 200.0f;
-        auto commandLatencyFrames = static_cast<unsigned int>(highCommandLatencyMillis / 16.0f) + 1;
-        auto targetCommandBufferSize = commandLatencyFrames;
+        auto targetCommandBufferSize = commandBufferTarget(gameNetworkService->getMaxAverageRttMillis(), gameSpeedLevel);
 
         auto bufferedCommandCount = playerCommandService->bufferedCommandCount(localPlayerId);
 
-        LOG_DEBUG << "Buffer levels (real/target) " << bufferedCommandCount << "/" << targetCommandBufferSize;
+        // per-frame "Buffer levels" diagnostic logging removed: it
+        // generated a formatted write + disk flush on the main thread
+        // every rendered frame (~200+/sec)
 
         // If we have too many commands buffered,
         // defer submitting commands this frame
@@ -2081,21 +3629,6 @@ namespace rwe
             gameNetworkService->submitCommands(sceneTime, std::vector<PlayerCommand>());
         }
 
-        // Queue up commands from the computer players
-        for (Index i = 0; i < getSize(simulation.players); ++i)
-        {
-            PlayerId id(i);
-            const auto& player = simulation.players[i];
-            if (player.type == GamePlayerType::Computer)
-            {
-                if (playerCommandService->bufferedCommandCount(id) == 0)
-                {
-                    // TODO: implement computer AI logic to decide commands here
-                    playerCommandService->pushCommands(id, std::vector<PlayerCommand>());
-                }
-            }
-        }
-
         // If we are waiting to swap in a new unit GUI panel, do that now
         if (nextPanel)
         {
@@ -2104,6 +3637,10 @@ namespace rwe
             attachOrdersMenuEventHandlers();
         }
 
+        // With one human there is no remote clock to follow. Applying drift
+        // correction to our own pre-update time would cap a long catch-up
+        // frame at the next five-tick check boundary.
+        const auto synchroniseSceneTime = !isSingleHumanPlayer();
         auto averageSceneTime = gameNetworkService->estimateAvergeSceneTime(sceneTime);
 
         // allow skipping sim frames every so often to get back down to average.
@@ -2112,31 +3649,78 @@ namespace rwe
         const SceneTime frameCheckInterval(5);
         auto highSceneTime = averageSceneTime + frameTolerance;
         auto lowSceneTime = averageSceneTime <= frameTolerance ? SceneTime{0} : averageSceneTime - frameTolerance;
-        for (; millisecondsBuffer >= SimMillisecondsPerTick; millisecondsBuffer -= SimMillisecondsPerTick)
+        if (perfEnabled)
         {
-            if (sceneTime % frameCheckInterval != SceneTime(0) || sceneTime <= highSceneTime)
+            perfAccMax = std::max(perfAccMax, tickAccumulator.pendingMilliseconds());
+        }
+        // Preserve the lockstep pacing policy: an unavailable remote frame
+        // consumes this wall-clock slot, rather than banking an unbounded
+        // catch-up backlog during a network stall. No simulation tick or
+        // command frame is consumed until every player has supplied one.
+        while (tickAccumulator.consumeTick())
+        {
+            if (simulationTransferredToDebrief)
             {
+                break;
+            }
+
+            if (sceneTickMayAdvance(sceneTime, highSceneTime, synchroniseSceneTime))
+            {
+                auto before = sceneTime;
                 tryTickGame();
+                if (perfEnabled)
+                {
+                    if (sceneTime > before)
+                    {
+                        ++perfTicksExec;
+                    }
+                    else
+                    {
+                        ++perfTicksBlocked;
+                    }
+                }
 
                 // simulate an extra frame to catch up every so often
-                if (sceneTime % frameCheckInterval == SceneTime(0) && sceneTime < lowSceneTime)
+                if (synchroniseSceneTime && sceneTime % frameCheckInterval == SceneTime(0) && sceneTime < lowSceneTime)
                 {
+                    auto before2 = sceneTime;
                     tryTickGame();
+                    if (perfEnabled)
+                    {
+                        if (sceneTime > before2)
+                        {
+                            ++perfTicksExec;
+                        }
+                        else
+                        {
+                            ++perfTicksBlocked;
+                        }
+                    }
                 }
             }
+        }
+
+        // stockpile counts change through sim ticks (round built or
+        // fired), not UI events; poll the label so it stays current
+        if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit)
+        {
+            refreshWeaponGuiTotal(*selectedUnit);
         }
 
         renderDebugWindow();
     }
 
-    std::optional<UnitId> GameScene::spawnUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<const std::reference_wrapper<SimAngle>> rotation)
+    std::optional<UnitId> GameScene::spawnUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<const std::reference_wrapper<SimAngle>> rotation, bool allowOverlap)
     {
-        return simulation.trySpawnUnit(unitType, owner, position, rotation);
+        // the initial-placement path (skirmish commander drop, debug
+        // spawn command) bypasses the maxunits cap like retail's
+        // direct slot-range population at game start
+        return simulation.trySpawnUnit(unitType, owner, position, rotation, allowOverlap, std::nullopt, true);
     }
 
-    std::optional<std::reference_wrapper<UnitState>> GameScene::spawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position)
+    std::optional<std::reference_wrapper<UnitState>> GameScene::spawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position, bool allowOverlap)
     {
-        auto unitId = spawnUnit(unitType, owner, position, std::nullopt);
+        auto unitId = spawnUnit(unitType, owner, position, std::nullopt, allowOverlap);
         if (unitId)
         {
             auto& unit = getUnit(*unitId);
@@ -2156,6 +3740,170 @@ namespace rwe
         auto cameraConstraint = computeCameraConstraint(simulation.terrain, worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
         auto constrainedPosition = cameraConstraint.clamp(Vector2f(newPosition.x, newPosition.z));
         worldCameraState.position = Vector3f(constrainedPosition.x, newPosition.y, constrainedPosition.y);
+    }
+
+    /**
+     * Scripted render-bench timeline (RWE_SCENE_BENCH). Runs on
+     * rendered-frame counts so phases hold a fixed number of frames
+     * regardless of frame rate:
+     *   f60   spawn `count` units around the camera anchor
+     *   f120  phase A label: idle
+     *   f420  select all spawned -> phase B: selected idle
+     *   f720  group MOVE to far corner -> phase C: moving on-screen
+     *   f1020 pan camera away -> phase D: moving off-screen
+     *   f1380 summary + exit
+     */
+    void GameScene::updateSceneBench()
+    {
+        if (!sceneBench.active || simulationTransferredToDebrief)
+        {
+            return;
+        }
+
+        auto anchor = worldCameraState.position;
+        // world coords are centred on the origin: x in [left,right],
+        // z in [top,bottom] -- half the range is negative
+        const auto minX = simScalarToFloat(simulation.terrain.leftInWorldUnits()) + 250.0f;
+        const auto maxX = simScalarToFloat(simulation.terrain.rightCutoffInWorldUnits()) - 250.0f;
+        const auto minZ = simScalarToFloat(simulation.terrain.topInWorldUnits()) + 250.0f;
+        const auto maxZ = simScalarToFloat(simulation.terrain.bottomCutoffInWorldUnits()) - 250.0f;
+        auto clampX = [&](float v) { return SimScalar(std::clamp(v, minX, maxX)); };
+        auto clampZ = [&](float v) { return SimScalar(std::clamp(v, minZ, maxZ)); };
+
+        // phase transitions flush the perf window so each RWE_PERF_SCENE
+        // line covers exactly one labelled phase
+        auto setBenchPhase = [&](const char* label) {
+            if (perfEnabled && !perfSamples.empty())
+            {
+                auto elapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - perfWindowStart)
+                                     .count();
+                reportPerfWindow(static_cast<double>(elapsedNs) / 1e9);
+            }
+            perfWindowLabel = label;
+            perfWindowStart = std::chrono::steady_clock::now();
+        };
+
+        auto tick = simulation.gameTime.value;
+
+        // hold the camera on the spawn centroid during on-screen phases;
+        // edge-scroll would otherwise drift it away from the cluster
+        if (sceneBench.cameraFocus && sceneBench.step >= 1 && sceneBench.step <= 3)
+        {
+            setCameraPosition(*sceneBench.cameraFocus);
+        }
+
+        switch (sceneBench.step)
+        {
+            case 0:
+                if (tick >= 30)
+                {
+                    int cols = std::max(1, static_cast<int>(std::sqrt(static_cast<double>(sceneBench.count))));
+                    const float spacing = 72.0f;
+                    for (unsigned int i = 0; i < sceneBench.count; ++i)
+                    {
+                        const auto& spec = sceneBench.unitTypes.empty()
+                            ? std::pair<std::string, bool>{sceneBench.unitType, false}
+                            : sceneBench.unitTypes[i % sceneBench.unitTypes.size()];
+                        SimScalar x = clampX(anchor.x + (static_cast<float>(i % cols) - cols / 2.0f) * spacing);
+                        SimScalar z = clampZ(anchor.z + (static_cast<float>(i / cols) - cols / 2.0f) * spacing);
+                        SimVector pos(x, simulation.terrain.getHeightAt(x, z), z);
+                        if (auto id = spawnUnit(spec.first, localPlayerId, pos, std::nullopt, true))
+                        {
+                            auto& unit = getUnit(*id);
+                            if (!spec.second)
+                            {
+                                unit.finishBuilding(simulation.unitDefinitions.at(unit.unitType));
+                            }
+                            sceneBench.spawned.push_back(*id);
+                        }
+                    }
+                    for (const auto& spec : sceneBench.unitTypes)
+                    {
+                        if (!isValidUnitType(simulation, spec.first))
+                        {
+                            LOG_WARN << "RWE_SCENE_BENCH: unknown unit type '" << spec.first << "'";
+                        }
+                    }
+                    // spawnUnit snaps to valid placement, which can leave the
+                    // cluster away from the initial camera anchor -- recenter
+                    // on the spawn centroid so phases A-C render the units
+                    if (!sceneBench.spawned.empty())
+                    {
+                        SimScalar cx(0), cz(0);
+                        for (auto id : sceneBench.spawned)
+                        {
+                            const auto& u = getUnit(id);
+                            cx = cx + u.position.x;
+                            cz = cz + u.position.z;
+                        }
+                        auto n = SimScalar(static_cast<float>(sceneBench.spawned.size()));
+                        auto centerX = cx / n;
+                        auto centerZ = cz / n;
+                        const auto& u0 = getUnit(sceneBench.spawned.front());
+                        sceneBench.cameraFocus = Vector3f(simScalarToFloat(centerX), worldCameraState.position.y, simScalarToFloat(centerZ));
+                        setCameraPosition(*sceneBench.cameraFocus);
+                        LOG_INFO << "RWE_SCENE_BENCH centroid=(" << simScalarToFloat(centerX) << "," << simScalarToFloat(centerZ)
+                                 << ") u0=(" << simScalarToFloat(u0.position.x) << "," << simScalarToFloat(u0.position.z)
+                                 << ") cam=(" << worldCameraState.position.x << "," << worldCameraState.position.z << ")";
+                    }
+                    LOG_INFO << "RWE_SCENE_BENCH spawned=" << sceneBench.spawned.size() << "/" << sceneBench.count << " type=" << sceneBench.unitType;
+                    setBenchPhase("A-idle");
+                    sceneBench.step = 1;
+                }
+                break;
+            case 1:
+                if (tick >= 330)
+                {
+                    for (auto id : sceneBench.spawned)
+                    {
+                        if (auto u = tryGetUnit(id); u && !u->get().isDead())
+                        {
+                            selectedUnits.insert(id);
+                        }
+                    }
+                    LOG_INFO << "RWE_SCENE_BENCH selected=" << selectedUnits.size();
+                    setBenchPhase("B-selected");
+                    sceneBench.step = 2;
+                }
+                break;
+            case 2:
+                if (tick >= 630)
+                {
+                    SimVector dest(clampX(minX + 0.80f * (maxX - minX)), SimScalar(0), clampZ(minZ + 0.80f * (maxZ - minZ)));
+                    dest.y = simulation.terrain.getHeightAt(dest.x, dest.z);
+                    for (auto id : sceneBench.spawned)
+                    {
+                        if (auto u = tryGetUnit(id); u && !u->get().isDead())
+                        {
+                            localPlayerIssueUnitOrder(id, MoveOrder(dest));
+                        }
+                    }
+                    LOG_INFO << "RWE_SCENE_BENCH move-issued count=" << sceneBench.spawned.size();
+                    setBenchPhase("C-move-onscreen");
+                    sceneBench.step = 3;
+                }
+                break;
+            case 3:
+                if (tick >= 930)
+                {
+                    setCameraPosition(Vector3f(minX + 0.15f * (maxX - minX), worldCameraState.position.y, minZ + 0.15f * (maxZ - minZ)));
+                    LOG_INFO << "RWE_SCENE_BENCH camera-away";
+                    setBenchPhase("D-move-offscreen");
+                    sceneBench.step = 4;
+                }
+                break;
+            case 4:
+                if (tick >= 1230)
+                {
+                    LOG_INFO << "RWE_SCENE_BENCH done frames=" << sceneBenchFrame << " tick=" << tick;
+                    sceneBench.step = 5;
+                    sceneContext.sceneManager->requestExit();
+                }
+                break;
+            default:
+                break;
+        }
     }
 
     const MapTerrain& GameScene::getTerrain() const
@@ -2259,9 +4007,13 @@ namespace rwe
     {
         // FIXME: should play on a position-aware channel
         auto channel = sceneContext.audioService->playSound(sound);
-        std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
-        playingUnitChannels.insert(channel);
-        sceneContext.audioService->setVolume(channel, computeSoundVolume(playingUnitChannels.size()));
+        int volume;
+        {
+            std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
+            playingUnitChannels.insert(channel);
+            volume = computeSoundVolume(playingUnitChannels.size());
+        }
+        sceneContext.audioService->setVolume(channel, volume);
     }
 
     void GameScene::playWeaponStartSound(const Vector3f& position, const std::string& weaponType)
@@ -2400,6 +4152,13 @@ namespace rwe
 
     void GameScene::tryTickGame()
     {
+        ScopedFrameTimer perfTimer(perfEnabled ? &perfTickNs : nullptr);
+
+        if (simulationTransferredToDebrief)
+        {
+            return;
+        }
+
         if (!playerCommandService->checkHashes())
         {
             std::ofstream dumpFile;
@@ -2409,20 +4168,69 @@ namespace rwe
             throw std::runtime_error("Desync detected");
         }
 
+        // Refill per attempted tick, rather than once per rendered update.
+        // A long frame must not stop after a single computer frame (or after
+        // the local human exhausts its prefilled latency horizon).
+        if (ensureLocalCommandFrame(*playerCommandService, localPlayerId))
+        {
+            gameNetworkService->submitCommands(sceneTime, {});
+        }
+        for (Index i = 0; i < getSize(simulation.players); ++i)
+        {
+            if (simulation.players[i].type == GamePlayerType::Computer)
+            {
+                ensureLocalCommandFrame(*playerCommandService, PlayerId(i));
+            }
+        }
+
         auto playerCommands = playerCommandService->tryPopCommands();
         if (!playerCommands)
         {
-            LOG_ERROR << "Blocked waiting for player commands";
+            // Missing remote frames can still block lockstep. Rate-limit
+            // diagnostics so a network stall cannot create a burst of disk
+            // flushes inside the drain loop itself.
+            static unsigned int suppressedBlockedLogs = 0;
+            if (++suppressedBlockedLogs >= 500)
+            {
+                LOG_ERROR << "Blocked waiting for player commands (x" << suppressedBlockedLogs << ")";
+                suppressedBlockedLogs = 0;
+            }
             return;
         }
 
         sceneTime += SceneTime(1);
 
-        processActions();
+        if (!gamePaused)
+        {
+            processActions();
 
+            // a queued delayed action may have handed the simulation
+            // to the debrief scene (enterMissionDebrief); the moved-from
+            // simulation must not tick again
+            if (simulationTransferredToDebrief)
+            {
+                return;
+            }
+        }
+
+        // commands keep flowing while paused so that an unpause command
+        // (and, in network games, every peer's command stream) is still
+        // consumed on schedule
         processPlayerCommands(*playerCommands);
 
+        if (gamePaused)
+        {
+            auto gameHash = simulation.computeHash();
+            playerCommandService->pushHash(localPlayerId, gameHash);
+            gameNetworkService->submitGameHash(gameHash);
+            return;
+        }
+
         simulation.tick();
+        if (perfEnabled)
+        {
+            ++perfTickCount;
+        }
 
         auto gameHash = simulation.computeHash();
         playerCommandService->pushHash(localPlayerId, gameHash);
@@ -2441,18 +4249,83 @@ namespace rwe
 
         updateParticles(gameMediaDatabase, simulation.gameTime, particles);
 
-        auto winStatus = simulation.computeWinStatus();
-        match(
-            winStatus,
-            [&](const WinStatusWon&) {
-                delay(SceneTime(5 * 30), [sm = sceneContext.sceneManager]() { sm->requestExit(); });
-            },
-            [&](const WinStatusDraw&) {
-                delay(SceneTime(5 * 30), [sm = sceneContext.sceneManager]() { sm->requestExit(); });
-            },
-            [&](const WinStatusUndecided&) {
-                // do nothing, game still in progress
-            });
+        // retail emits the nanolathe spray once per work tick from
+        // each actively-working unit (TotalA.exe effect channel 6)
+        emitNanolatheParticles(simulation, simulation.gameTime, particles, nanolatheRng);
+
+        if (simulation.missionInfo)
+        {
+            // campaign missions report via the objective evaluator
+            // rather than skirmish last-player-standing
+            auto action = missionEndAction(simulation.getMissionResult(), missionResultDeclared);
+            if (action != MissionEndAction::None)
+            {
+                missionResultDeclared = true;
+                missionResultWon = action == MissionEndAction::DeclareVictory;
+                LOG_INFO << (missionResultWon
+                        ? "Mission accomplished (victory objectives met)"
+                        : "Mission failed (defeat condition met)");
+
+                // In-game result banner (retail +0x3923b
+                // bit5/bit6 -> igvictory/igdefeat overlay while
+                // the simulation keeps ticking). The banner
+                // then gives way to the ENDMSN debrief screen;
+                // retail's interactive score interstitial and
+                // the exact transition timing are approximated
+                // by this fixed delay.
+                if (auto series = sceneContext.textureService->tryGetGafEntry(
+                        "anims/igtitles.gaf",
+                        missionResultWon ? "igvictory" : "igdefeat"))
+                {
+                    if (!(*series)->sprites.empty())
+                    {
+                        missionResultSprite = (*series)->sprites.front();
+                    }
+                }
+                delay(SceneTime(3 * 30), [this]() { enterMissionDebrief(); });
+            }
+        }
+        else
+        {
+            auto winStatus = simulation.computeWinStatus();
+            match(
+                winStatus,
+                [&](const WinStatusWon&) {
+                    delay(SceneTime(5 * 30), [sm = sceneContext.sceneManager]() { sm->requestExit(); });
+                },
+                [&](const WinStatusDraw&) {
+                    delay(SceneTime(5 * 30), [sm = sceneContext.sceneManager]() { sm->requestExit(); });
+                },
+                [&](const WinStatusUndecided&) {
+                    // do nothing, game still in progress
+                });
+        }
+    }
+
+    void GameScene::drawMinimapFog()
+    {
+        if (!simulation.lineOfSightEnabled
+            || localPlayerId.value >= simulation.playerVisibility.size())
+        {
+            return;
+        }
+        const auto& pv = simulation.playerVisibility[localPlayerId.value];
+        const auto& losGrid = pv.losGrid;
+        const auto& exploredGrid = pv.exploredGrid;
+        auto width = losGrid.getWidth();
+        auto height = losGrid.getHeight();
+        if (width == 0 || height == 0)
+        {
+            return;
+        }
+
+        // coalesce horizontal runs into batched quads so the whole overlay
+        // costs two uploads/draws instead of one per run
+        std::vector<GlColoredVertex> unexploredVerts;
+        std::vector<GlColoredVertex> exploredVerts;
+        fillMinimapFogVertices(losGrid, exploredGrid, minimapRect, unexploredVerts, exploredVerts);
+        chromeUiRenderService.fillColorBatch(unexploredVerts, 230);
+        chromeUiRenderService.fillColorBatch(exploredVerts, 110);
     }
 
     std::optional<UnitId> GameScene::getUnitUnderCursor() const
@@ -2465,6 +4338,14 @@ namespace rwe
 
             for (const auto& [unitId, unit] : simulation.units)
             {
+                if (unit.carriedBy)
+                {
+                    continue;
+                }
+                if (!simulation.isDetectedByPlayer(unitId, localPlayerId))
+                {
+                    continue;
+                }
                 // convert to minimap rect
                 auto minimapPos = worldToMinimap * simVectorToFloat(unit.position);
                 minimapPos.x = std::floor(minimapPos.x);
@@ -2537,6 +4418,16 @@ namespace rwe
 
         for (const auto& entry : simulation.units)
         {
+            if (entry.second.carriedBy)
+            {
+                // cargo inside a transport is not pickable
+                continue;
+            }
+            if (!simulation.isLosVisibleToPlayer(entry.first, localPlayerId))
+            {
+                // undetected enemies are not pickable
+                continue;
+            }
             const auto& unitDefinition = simulation.unitDefinitions.at(entry.second.unitType);
             auto selectionMesh = gameMediaDatabase.getSelectionCollisionMesh(unitDefinition.objectName);
             auto distance = selectionIntersect(entry.second, *selectionMesh.value(), ray);
@@ -2610,6 +4501,212 @@ namespace rwe
         return std::nullopt;
     }
 
+    bool GameScene::tryRemoveQueuedOrderAtCursor()
+    {
+        return match(
+            cursorMode.getValue(),
+            [&](const AttackCursorMode&) { return tryRemoveQueuedOrderAtMarker(CursorType::Attack); },
+            [&](const MoveCursorMode&) { return tryRemoveQueuedOrderAtMarker(CursorType::Move); },
+            [&](const GuardCursorMode&) { return tryRemoveQueuedOrderAtMarker(CursorType::Guard); },
+            [&](const RepairCursorMode&) { return tryRemoveQueuedOrderAtMarker(CursorType::Repair); },
+            [&](const ReclaimCursorMode&) { return tryRemoveQueuedOrderAtMarker(CursorType::Reclaim); },
+            [&](const PatrolCursorMode&) { return tryRemoveQueuedOrderAtMarker(CursorType::Patrol); },
+            [&](const CommandFireCursorMode&) { return tryRemoveQueuedOrderAtMarker(CursorType::CommandFire); },
+            [&](const CaptureCursorMode&) { return tryRemoveQueuedOrderAtMarker(CursorType::Capture); },
+            [&](const LoadCursorMode&) { return tryRemoveQueuedOrderAtMarker(CursorType::Load); },
+            [&](const UnloadCursorMode&) { return tryRemoveQueuedOrderAtMarker(CursorType::Unload); },
+            [&](const BuildCursorMode&) { return tryRemoveQueuedBuildOrderAtCursor(); },
+            [&](const auto&) { return false; });
+    }
+
+    bool GameScene::tryRemoveQueuedOrderAtMarker(CursorType markerType)
+    {
+        auto worldToUi = worldUiRenderService.getInverseViewProjectionMatrix()
+            * computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+
+        // marker positions are drawn in worldViewport-local UI space,
+        // so the mouse must be converted from scene (window) space the
+        // same way rather than compared raw
+        auto uiMousePos = sceneContext.viewport->toOtherViewport(worldViewport, getMousePosition());
+        Vector2f uiMouse(static_cast<float>(uiMousePos.x), static_cast<float>(uiMousePos.y));
+
+        std::vector<std::pair<UnitId, int>> candidates;
+        std::vector<Vector2f> candidateCenters;
+
+        for (const auto& unitId : selectedUnits)
+        {
+            const auto& unit = getUnit(unitId);
+            auto pos = unit.position;
+            int index = 0;
+            for (const auto& order : unit.orders)
+            {
+                auto nextPos = orderMarkerPosition(simulation, order, pos);
+                pos = nextPos;
+
+                auto icon = orderMarkerCursorType(order);
+                if (icon && *icon == markerType)
+                {
+                    const auto& sprites = sceneContext.cursor->getCursor(*icon)->sprites;
+                    if (!sprites.empty())
+                    {
+                        auto uiDest = worldToUi * simVectorToFloat(nextPos);
+                        const auto& bounds = sprites.front()->bounds;
+                        if (orderMarkerContainsPoint(bounds, uiDest.xy(), uiMouse, OrderMarkerHitSlop))
+                        {
+                            candidates.emplace_back(unitId, index);
+                            candidateCenters.push_back(uiDest.xy() + bounds.position);
+                        }
+                    }
+                }
+
+                ++index;
+            }
+        }
+
+        if (auto best = nearestUiPoint(candidateCenters, uiMouse))
+        {
+            const auto& [unitId, index] = candidates[*best];
+            localPlayerRemoveUnitOrder(unitId, index);
+            return true;
+        }
+
+        return false;
+    }
+
+    bool GameScene::tryRemoveQueuedBuildOrderAtCursor()
+    {
+        auto terrainPos = getMouseTerrainCoordinate();
+        if (!terrainPos)
+        {
+            return false;
+        }
+        auto cell = simulation.terrain.worldToHeightmapCoordinate(*terrainPos);
+
+        for (const auto& unitId : selectedUnits)
+        {
+            const auto& unit = getUnit(unitId);
+            int index = 0;
+            for (const auto& order : unit.orders)
+            {
+                if (const auto buildOrder = std::get_if<BuildOrder>(&order))
+                {
+                    const auto& unitDefinition = simulation.unitDefinitions.at(buildOrder->unitType);
+                    auto footprintRect = simulation.computeFootprintRegion(buildOrder->position, unitDefinition.movementCollisionInfo);
+                    if (footprintRect.contains(cell))
+                    {
+                        localPlayerRemoveUnitOrder(unitId, index);
+                        return true;
+                    }
+                }
+
+                ++index;
+            }
+        }
+
+        return false;
+    }
+
+    void GameScene::completeBuildPlacement(const std::string& unitType)
+    {
+        auto drag = buildDragState;
+        buildDragState = std::nullopt;
+        auto candidates = std::move(buildDragCandidates);
+        buildDragCandidates.clear();
+
+        if (!drag || drag->unitType != unitType)
+        {
+            return;
+        }
+
+        auto selectedUnit = getSingleSelectedUnit();
+        if (!selectedUnit)
+        {
+            return;
+        }
+
+        auto candidateCenter = [&](const BuildDragCandidate& c) {
+            auto corner = simulation.terrain.heightmapIndexToWorldCorner(c.rect.x, c.rect.y);
+            auto x = corner.x + ((SimScalar(c.rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
+            auto z = corner.z + ((SimScalar(c.rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
+            return SimVector(x, c.baseY, z);
+        };
+
+        auto playNotOkToBuild = [&]() {
+            if (sounds.notOkToBuild)
+            {
+                playUiSound(*sounds.notOkToBuild);
+            }
+        };
+
+        if (!drag->engaged)
+        {
+            // same-cell click: stock single placement. Placement is
+            // recomputed at the anchor rather than read back from the
+            // candidate list so a click that completes between update
+            // ticks (before any preview ran) still resolves.
+            const auto& unitDefinition = simulation.unitDefinitions.at(unitType);
+            auto mc = simulation.getAdHocMovementClass(unitDefinition.movementCollisionInfo);
+            auto placement = simulation.computeBuildingPlacement(mc, unitDefinition.yardMap, unitDefinition.yardMapContainsGeo, unitDefinition.waterline, drag->anchorRect.x, drag->anchorRect.y);
+            if (!placement || !placement->valid)
+            {
+                playNotOkToBuild();
+                return;
+            }
+            auto corner = simulation.terrain.heightmapIndexToWorldCorner(drag->anchorRect.x, drag->anchorRect.y);
+            SimVector buildPos(
+                corner.x + ((SimScalar(drag->anchorRect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss),
+                placement->baseY,
+                corner.z + ((SimScalar(drag->anchorRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
+            if (isShiftDown())
+            {
+                localPlayerEnqueueUnitOrder(*selectedUnit, BuildOrder(unitType, buildPos));
+            }
+            else
+            {
+                localPlayerIssueUnitOrder(*selectedUnit, BuildOrder(unitType, buildPos));
+                cursorMode.next(NormalCursorMode());
+            }
+            return;
+        }
+
+        // engaged drag: emit one ordinary BuildOrder per valid site in
+        // line order; first site replaces the queue when Shift is up
+        bool emittedAny = false;
+        const auto& selectedOrders = getUnit(*selectedUnit).orders;
+        for (const auto& candidate : candidates)
+        {
+            if (!candidate.valid)
+            {
+                continue;
+            }
+            auto buildPos = candidateCenter(candidate);
+
+            // suppress sites already queued on this builder
+            if (queuedBuildSiteExists(selectedOrders, unitType, buildPos))
+            {
+                continue;
+            }
+
+            if (!emittedAny && !isShiftDown())
+            {
+                localPlayerIssueUnitOrder(*selectedUnit, BuildOrder(unitType, buildPos));
+            }
+            else
+            {
+                localPlayerEnqueueUnitOrder(*selectedUnit, BuildOrder(unitType, buildPos));
+            }
+            emittedAny = true;
+        }
+
+        if (!emittedAny && !candidates.empty())
+        {
+            // a drag released off the world has no candidates and
+            // cancels silently; a line of all-invalid sites gets feedback
+            playNotOkToBuild();
+        }
+        // stay armed so another line can be drawn
+    }
+
     void GameScene::localPlayerIssueUnitOrder(UnitId unitId, const UnitOrder& order)
     {
         auto kind = PlayerUnitCommand::IssueOrder::IssueKind::Immediate;
@@ -2671,6 +4768,11 @@ namespace rwe
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetOnOff{on}));
     }
 
+    void GameScene::localPlayerSetCloak(UnitId unitId, bool on)
+    {
+        localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetCloak{on}));
+    }
+
     void GameScene::localPlayerModifyBuildQueue(UnitId unitId, const std::string& unitType, int count)
     {
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::ModifyBuildQueue{count, unitType}));
@@ -2679,23 +4781,42 @@ namespace rwe
         refreshBuildGuiTotal(unitId, unitType);
     }
 
+    void GameScene::localPlayerModifyWeaponQueue(UnitId unitId, int count)
+    {
+        localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::ModifyWeaponQueue{count}));
+
+        unconfirmedWeaponQueueDelta[unitId] += count;
+        refreshWeaponGuiTotal(unitId);
+    }
+
+    void GameScene::localPlayerRemoveUnitOrder(UnitId unitId, int index)
+    {
+        localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::RemoveOrder{index}));
+    }
+
+    void GameScene::localPlayerToggleSelfDestruct(UnitId unitId)
+    {
+        localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::ToggleSelfDestruct()));
+    }
+
     void GameScene::issueUnitOrder(UnitId unitId, const UnitOrder& order)
     {
         auto unit = tryGetUnit(unitId);
         if (unit)
         {
-            unit->get().clearOrders();
-            unit->get().addOrder(order);
+            applyBasicPlayerUnitCommand(unit->get(), PlayerUnitCommand::IssueOrder(order, PlayerUnitCommand::IssueOrder::Immediate));
         }
     }
 
     void GameScene::enqueueUnitOrder(UnitId unitId, const UnitOrder& order)
     {
         auto unit = tryGetUnit(unitId);
-        if (unit)
+        if (!unit)
         {
-            unit->get().addOrder(order);
+            return;
         }
+
+        applyBasicPlayerUnitCommand(unit->get(), PlayerUnitCommand::IssueOrder(order, PlayerUnitCommand::IssueOrder::Queued));
     }
 
     void GameScene::stopUnit(UnitId unitId)
@@ -2703,7 +4824,21 @@ namespace rwe
         auto unit = tryGetUnit(unitId);
         if (unit)
         {
-            unit->get().clearOrders();
+            applyBasicPlayerUnitCommand(unit->get(), PlayerUnitCommand::Stop{});
+        }
+    }
+
+    void GameScene::removeUnitOrderAt(UnitId unitId, int index)
+    {
+        if (index < 0)
+        {
+            return;
+        }
+
+        auto unit = tryGetUnit(unitId);
+        if (unit)
+        {
+            unit->get().removeOrderAt(static_cast<std::size_t>(index));
         }
     }
 
@@ -2712,13 +4847,62 @@ namespace rwe
         auto unit = tryGetUnit(unitId);
         if (unit)
         {
-            unit->get().fireOrders = orders;
+            applyBasicPlayerUnitCommand(unit->get(), PlayerUnitCommand::SetFireOrders{orders});
 
             if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit && *selectedUnit == unitId)
             {
                 fireOrders.next(orders);
             }
         }
+    }
+
+    void GameScene::setCloak(UnitId unitId, bool on)
+    {
+        auto unit = tryGetUnit(unitId);
+        if (!unit)
+        {
+            return;
+        }
+        // the CLOAK_ON/CLOAK_OFF order handlers gate on the unitdef
+        // cloak bit (+0x245 bit13 = CloakCost > 0); a non-capable
+        // unit silently ignores the order (retail 0x403070/0x4030a0)
+        if (!(simulation.unitDefinitions.at(unit->get().unitType).cloakCost > 0.0f))
+        {
+            return;
+        }
+        unit->get().cloakRequested = on;
+
+        // retail writes the optimistic mask bit on click; the strip
+        // shows the requested state, not the effective cloak
+        cloakStage.next(cloakPanelStage(simulation, selectedUnits));
+    }
+
+    void GameScene::toggleSelfDestruct(UnitId unitId)
+    {
+        auto unit = tryGetUnit(unitId);
+        if (!unit)
+        {
+            return;
+        }
+        auto& state = unit->get();
+        if (state.isDead())
+        {
+            return;
+        }
+        if (state.selfDestruct)
+        {
+            // the command node toggles: a second SELFDESTRUCT while
+            // armed runs canceldestruct ("Self destruct terminated")
+            state.selfDestruct = std::nullopt;
+            simulation.events.push_back(UnitSelfDestructCancelledEvent{unitId});
+            return;
+        }
+
+        const auto& unitDefinition = simulation.unitDefinitions.at(state.unitType);
+        state.selfDestruct = SelfDestructOrder{static_cast<unsigned int>(unitDefinition.selfDestructCountdown) * SimTicksPerSecond};
+
+        // retail announces the top of the countdown immediately
+        simulation.events.push_back(UnitSelfDestructCountdownEvent{unitId, static_cast<int>(unitDefinition.selfDestructCountdown)});
     }
 
     void GameScene::startTrack()
@@ -2787,6 +4971,21 @@ namespace rwe
         return (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
     }
 
+    bool GameScene::isAltDown() const
+    {
+        return (SDL_GetModState() & SDL_KMOD_ALT) != 0;
+    }
+
+    bool GameScene::isModifiedLetterOrDigit(SDL_Keycode key) const
+    {
+        if (!isCtrlDown() && !isAltDown())
+        {
+            return false;
+        }
+        return (key >= 'a' && key <= 'z') || (key >= 'A' && key <= 'Z')
+            || (key >= '0' && key <= '9');
+    }
+
     bool GameScene::isShiftDown() const
     {
         return (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
@@ -2800,8 +4999,963 @@ namespace rwe
                 clearUnitSelection();
             },
             [this](const auto&) {
+                buildDragState = std::nullopt;
+                buildDragCandidates.clear();
                 cursorMode.next(NormalCursorMode());
             });
+    }
+
+    bool GameScene::inGameMenuOpen() const
+    {
+        return !inGameMenuDialogs.empty();
+    }
+
+    bool GameScene::isSingleHumanPlayer() const
+    {
+        unsigned int humans = 0;
+        for (const auto& player : simulation.players)
+        {
+            if (player.type == GamePlayerType::Human)
+            {
+                ++humans;
+            }
+        }
+        return humans == 1;
+    }
+
+    void GameScene::adjustGameSpeed(int delta)
+    {
+        // the retail keys are single-player only; the word clamps at
+        // 1..20 and 10 is real-time
+        if (!isSingleHumanPlayer())
+        {
+            return;
+        }
+        gameSpeedLevel = std::clamp(gameSpeedLevel + delta, 1, 20);
+    }
+
+    void GameScene::openInGameMenu()
+    {
+        // an unfinished linear-build drag must place nothing once the
+        // menu opens
+        buildDragState = std::nullopt;
+        buildDragCandidates.clear();
+
+        // a bandbox or minimap drag in progress is abandoned; its
+        // mouse-up is consumed by the menu
+        if (auto normalCursor = std::get_if<NormalCursorMode>(&cursorMode.getValue()))
+        {
+            if (!std::holds_alternative<NormalCursorMode::UpState>(normalCursor->state))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+        }
+
+        // drop any held camera-scroll keys; their key-up events are
+        // routed to the menu while it is open
+        up = false;
+        down = false;
+        left = false;
+        right = false;
+        cameraControlState = CameraControlStateFree();
+
+        sceneContext.cursor->useCursor(CursorType::Normal);
+
+        // single-player games pause while the menu is open; networked
+        // games do not (retail pauses only offline). The pause travels
+        // through the normal command stream so it stays in lockstep.
+        if (isSingleHumanPlayer() && !gamePaused)
+        {
+            localPlayerCommandBuffer.push_back(PlayerPauseGameCommand());
+            inGameMenuPauseOwned = true;
+        }
+
+        const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
+        auto optionsPanel = createInGameMenuDialog(sidePrefix + "OPT");
+
+        // save/load round-trip through the local filesystem; a
+        // networked game cannot offer them, so its buttons stay
+        // disabled rather than silently doing nothing
+        if (!isSingleHumanPlayer())
+        {
+            for (const auto& buttonName : {"LOADGAME", "SAVEGAME"})
+            {
+                if (auto button = optionsPanel->find<UiStagedButton>(buttonName))
+                {
+                    button->get().setEnabled(false);
+                }
+            }
+        }
+
+        pushInGameMenuDialog(std::move(optionsPanel));
+    }
+
+    void GameScene::openInGameMenuHelp()
+    {
+        // retail F1 opens the help screen directly (TotalA.exe
+        // 0x4960ea); in single-player it pauses like the options menu
+        if (isSingleHumanPlayer() && !gamePaused)
+        {
+            localPlayerCommandBuffer.push_back(PlayerPauseGameCommand());
+            inGameMenuPauseOwned = true;
+        }
+
+        auto dialog = createInGameMenuDialog("HELP");
+        populateHelpDialog(*dialog);
+        pushInGameMenuDialog(std::move(dialog));
+    }
+
+    void GameScene::closeInGameMenu()
+    {
+        // dialogs removed mid-dispatch retire instead of dying here;
+        // a child's key/mouse broadcast is what emitted the activation
+        for (auto& dialog : inGameMenuDialogs)
+        {
+            inGameMenuRetiredDialogs.push_back(std::move(dialog));
+        }
+        inGameMenuDialogs.clear();
+        inGameMenuDialogCompanions.clear();
+        inGameMenuMouseTarget = nullptr;
+        inGameMenuConfirmAction = nullptr;
+
+        reapInGameMenuDialogs();
+
+        if (inGameMenuPauseOwned)
+        {
+            localPlayerCommandBuffer.push_back(PlayerUnpauseGameCommand());
+            inGameMenuPauseOwned = false;
+        }
+    }
+
+    void GameScene::pushInGameMenuDialog(std::unique_ptr<UiPanel>&& panel, bool companionPane)
+    {
+        auto& p = inGameMenuDialogs.emplace_back(std::move(panel));
+        inGameMenuDialogCompanions.push_back(companionPane);
+        p->groupMessages().subscribe([this](const auto& msg) {
+            if (auto activate = std::get_if<ActivateMessage>(&msg.message); activate != nullptr)
+            {
+                onInGameMenuMessage(msg.topic, msg.controlName, activate->type);
+            }
+        });
+    }
+
+    void GameScene::popInGameMenuDialog()
+    {
+        if (inGameMenuDialogs.empty())
+        {
+            return;
+        }
+
+        inGameMenuRetiredDialogs.push_back(std::move(inGameMenuDialogs.back()));
+        inGameMenuDialogs.pop_back();
+        inGameMenuDialogCompanions.pop_back();
+        inGameMenuMouseTarget = nullptr;
+
+        // a pending yes/no answer belongs to the dialog that was open
+        inGameMenuConfirmAction = nullptr;
+
+        if (inGameMenuDialogs.empty())
+        {
+            closeInGameMenu();
+        }
+
+        reapInGameMenuDialogs();
+    }
+
+    void GameScene::popInGameMenuDialogThrough(const std::string& panelName)
+    {
+        while (!inGameMenuDialogs.empty())
+        {
+            bool reached = inGameMenuDialogs.back()->getName() == panelName;
+            inGameMenuRetiredDialogs.push_back(std::move(inGameMenuDialogs.back()));
+            inGameMenuDialogs.pop_back();
+            inGameMenuDialogCompanions.pop_back();
+            if (reached)
+            {
+                break;
+            }
+        }
+        inGameMenuMouseTarget = nullptr;
+        inGameMenuConfirmAction = nullptr;
+
+        if (inGameMenuDialogs.empty())
+        {
+            closeInGameMenu();
+        }
+
+        reapInGameMenuDialogs();
+    }
+
+    void GameScene::reapInGameMenuDialogs()
+    {
+        if (inGameMenuDispatchDepth == 0)
+        {
+            inGameMenuRetiredDialogs.clear();
+        }
+    }
+
+    UiPanel* GameScene::inGameMenuPointerTarget(int x, int y)
+    {
+        // topmost-first: companion option panes receive points inside
+        // their rect and otherwise yield to the screen beneath; a real
+        // modal dialog owns the point or blocks it entirely
+        for (auto i = inGameMenuDialogs.size(); i-- > 0;)
+        {
+            if (inGameMenuDialogs[i]->contains(x, y))
+            {
+                return inGameMenuDialogs[i].get();
+            }
+            if (!inGameMenuDialogCompanions[i])
+            {
+                return nullptr;
+            }
+        }
+        return nullptr;
+    }
+
+    UiPanel* GameScene::inGameMenuKeyTarget()
+    {
+        // ESC/Enter on a companion pane resolve against the owning
+        // screen's defaults (SPEEDSRT has none; PREFS maps both to
+        // the committing PREV button)
+        for (auto i = inGameMenuDialogs.size(); i-- > 0;)
+        {
+            if (!inGameMenuDialogCompanions[i])
+            {
+                return inGameMenuDialogs[i].get();
+            }
+        }
+        return nullptr;
+    }
+
+    void GameScene::commitInterfaceModePreference()
+    {
+        if (sceneContext.globalConfig->configFilePath.empty())
+        {
+            return;
+        }
+        writeConfigValue(
+            sceneContext.globalConfig->configFilePath,
+            "interface-mode",
+            sceneContext.globalConfig->leftClickInterfaceMode ? "left-click" : "right-click");
+    }
+
+    void GameScene::togglePause()
+    {
+        if (gamePaused)
+        {
+            localPlayerCommandBuffer.push_back(PlayerUnpauseGameCommand());
+        }
+        else
+        {
+            localPlayerCommandBuffer.push_back(PlayerPauseGameCommand());
+        }
+    }
+
+    std::unique_ptr<UiPanel> GameScene::createInGameMenuDialog(const std::string& guiName)
+    {
+        // stock data ships only the ARM variant of the in-game options
+        // panel; other sides' OPT names fall back to it
+        std::string resolvedName = guiName;
+        if (!sceneContext.vfs->readFile(sceneContext.pathMapping->guis + "/" + resolvedName + ".GUI") && endsWith(resolvedName, "OPT"))
+        {
+            resolvedName = "ARMOPT";
+        }
+
+        auto panel = uiFactory.panelFromGuiFile(resolvedName);
+
+        // PictureBox/Surface gadgets (OPTBG, IGOPT, SPEEDSRT, ...)
+        // carry their background texture in a same-named GAF entry,
+        // resolved per-gui with a commongui fallback
+        for (const auto& child : panel->getChildren())
+        {
+            auto* surface = dynamic_cast<UiSurface*>(child.get());
+            if (surface == nullptr)
+            {
+                continue;
+            }
+            if (auto texture = sceneContext.textureService->getGuiTexture(resolvedName, surface->getName()))
+            {
+                surface->setBackground((*texture)->sprites.at(0));
+            }
+        }
+
+        return panel;
+    }
+
+    std::unique_ptr<UiPanel> GameScene::createYesNoDialog(const std::string& titleText)
+    {
+        auto panel = createInGameMenuDialog("YESORNO");
+        if (auto title = panel->find<UiLabel>("TITLE"))
+        {
+            title->get().setText(titleText);
+        }
+        return panel;
+    }
+
+    std::unique_ptr<UiPanel> GameScene::createSaveListDialog(bool saveMode)
+    {
+        inGameMenuSaveListIsSave = saveMode;
+        auto panel = createInGameSaveListPanel(
+            uiFactory,
+            sceneContext.textureService,
+            sceneContext.vfs,
+            saveMode,
+            &inGameMenuSaveListEntries);
+
+        // save mode starts with an empty entry field and no selection;
+        // load mode has nothing editable to begin with
+        if (auto box = panel->find<UiTextBox>("GAMENAME"))
+        {
+            box->get().setText("");
+        }
+        if (saveMode)
+        {
+            panel->setFocusByName("GAMENAME");
+        }
+
+        refreshSaveListDialog(*panel);
+        return panel;
+    }
+
+    void GameScene::refreshSaveListDialog(UiPanel& panel)
+    {
+        inGameMenuSaveListEntries.clear();
+        if (auto dir = saveGameDirectory())
+        {
+            inGameMenuSaveListEntries = listSavedGames(*dir);
+        }
+        populateSaveList(panel, inGameMenuSaveListEntries);
+    }
+
+    void GameScene::performSaveGame(UiPanel& panel)
+    {
+        std::string typed;
+        if (auto box = panel.find<UiTextBox>("GAMENAME"))
+        {
+            typed = box->get().getText();
+        }
+
+        auto name = sanitizeSaveName(typed);
+        if (name.empty())
+        {
+            return;
+        }
+
+        auto dir = saveGameDirectory();
+        if (!dir)
+        {
+            return;
+        }
+
+        // single-player menus pause the sim, so the F2 dialog is a
+        // natural save boundary: the snapshot below is taken while the
+        // command stream is stopped and no container is mid-mutation
+        auto doSave = [this, name, dir]() {
+            auto bytes = encodeSavedGame(
+                simulation,
+                gameParameters,
+                sceneContext.campaignProgress,
+                name,
+                static_cast<std::uint64_t>(std::time(nullptr)));
+            writeSavedGameFile(*dir, name, bytes);
+            closeInGameMenu();
+        };
+
+        auto path = saveGamePath(*dir, name);
+        if (path && std::filesystem::exists(*path))
+        {
+            inGameMenuConfirmAction = std::move(doSave);
+            pushInGameMenuDialog(createYesNoDialog("Overwrite existing saved game?"));
+            return;
+        }
+
+        doSave();
+    }
+
+    void GameScene::performLoadGame(UiPanel& panel)
+    {
+        auto listBox = panel.find<UiListBox>("GAMES");
+        if (!listBox)
+        {
+            return;
+        }
+        auto selected = listBox->get().getSelectedIndex();
+        if (!selected || *selected >= inGameMenuSaveListEntries.size())
+        {
+            return;
+        }
+
+        auto dir = saveGameDirectory();
+        if (!dir)
+        {
+            return;
+        }
+
+        DecodedSaveGame decoded;
+        try
+        {
+            auto bytes = readSavedGameFile(*dir, inGameMenuSaveListEntries[*selected].saveName);
+            decoded = decodeSavedGame(bytes);
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "Failed to read save file: " << e.what();
+            return;
+        }
+
+        auto params = gameParametersFromSave(decoded);
+        sceneContext.sceneManager->setNextScene(std::make_shared<LoadingScene>(
+            sceneContext,
+            audioLookup,
+            AudioService::LoopToken(),
+            params,
+            std::move(decoded)));
+    }
+
+    Point GameScene::toInGameMenuCoordinates(int x, int y) const
+    {
+        auto clip = screenToWorldRayUtil(menuUiRenderService.getInverseViewProjectionMatrix(), sceneContext.viewport->toClipSpace(x, y));
+        return Point(static_cast<int>(clip.origin.x), static_cast<int>(clip.origin.y));
+    }
+
+    void GameScene::renderInGameMenu()
+    {
+        for (const auto& dialog : inGameMenuDialogs)
+        {
+            menuUiRenderService.fillScreen(Color(0, 0, 0, 63));
+            dialog->render(menuUiRenderService);
+        }
+    }
+
+    void GameScene::populateHelpDialog(UiPanel& panel)
+    {
+        auto helpRaw = sceneContext.vfs->readFile(sceneContext.pathMapping->gamedata + "/HELP.TDF");
+        if (!helpRaw)
+        {
+            return;
+        }
+
+        if (auto pageButton = panel.find<UiStagedButton>("Page"))
+        {
+            inGameMenuHelpPage = pageButton->get().getStage();
+        }
+
+        auto text = inGameHelpText(std::string(helpRaw->begin(), helpRaw->end()), inGameMenuHelpPage, 3);
+
+        // the stock HELP.GUI has no text gadget; the retail executable
+        // draws the page contents into the dialog body between the
+        // "Keyboard Commands" title (y 16-32) and the buttons (y 377)
+        if (auto textArea = panel.find<UiLabel>("HelpText"))
+        {
+            textArea->get().setText(text);
+        }
+        else
+        {
+            auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+            auto label = std::make_unique<UiLabel>(6, 28, 480, 336, text, font);
+            label->setName("HelpText");
+            label->setAlignment(UiLabel::Alignment::LeftWrapped);
+            panel.appendChild(std::move(label));
+        }
+    }
+
+    void GameScene::populateInterfaceDialog(UiPanel& panel)
+    {
+        // stock SPEEDSRT controls: only LEFTCLICK (Button Interface)
+        // has a runtime backend -- GlobalConfig.leftClickInterfaceMode,
+        // read live by leftClickMode(). Game/screen scroll speed,
+        // unit chat and text sliders have no backing and are disabled
+        // (horizontal sliders render as disabled display gadgets).
+        if (auto leftClick = panel.find<UiStagedButton>("LEFTCLICK"))
+        {
+            leftClick->get().setStage(sceneContext.globalConfig->leftClickInterfaceMode ? 0 : 1);
+        }
+        if (auto unitChat = panel.find<UiStagedButton>("UNITCHAT"))
+        {
+            unitChat->get().setEnabled(false);
+        }
+    }
+
+    void GameScene::populateBriefingDialog(UiPanel& panel)
+    {
+        // retail draws the campaign brief file's text into TextRegion
+        // and pages it via TextRegion/MOREBAR clicks; `&x` color codes
+        // switch colors and `*emphasis*` markers render literally
+        std::string text;
+        if (simulation.missionInfo && !simulation.missionInfo->brief.empty())
+        {
+            auto briefRaw = sceneContext.vfs->readFile(sceneContext.pathMapping->camps + "/briefs/" + briefFileName(simulation.missionInfo->brief));
+            if (briefRaw)
+            {
+                text = sanitizeBriefText(std::string(briefRaw->begin(), briefRaw->end()), true);
+            }
+        }
+
+        inGameMenuBriefingPages.clear();
+        inGameMenuBriefingPage = 0;
+
+        if (auto region = panel.find<UiLabel>("TextRegion"))
+        {
+            auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+            auto lines = wrapTextLines(text, region->get().getWidth(), [&](const std::string& s) {
+                return menuUiRenderService.getTextWidth(s, *font);
+            });
+
+            // drawTextWrapped draws at a fixed 15px line pitch; the
+            // page capacity follows the TextRegion rect
+            auto linesPerPage = static_cast<unsigned int>(region->get().getHeight() / 15.0f);
+            inGameMenuBriefingPages = paginateLines(lines, std::max(linesPerPage, 1u));
+            region->get().setClickable(true);
+            region->get().setAlignment(UiLabel::Alignment::LeftWrapped);
+        }
+
+        if (auto moreBar = panel.find<UiLabel>("MOREBAR"))
+        {
+            moreBar->get().setClickable(true);
+            moreBar->get().setAlignment(UiLabel::Alignment::CenterRect);
+        }
+
+        applyBriefingPage(panel);
+    }
+
+    void GameScene::applyBriefingPage(UiPanel& panel)
+    {
+        if (auto region = panel.find<UiLabel>("TextRegion"))
+        {
+            region->get().setText(inGameMenuBriefingPages.at(inGameMenuBriefingPage));
+        }
+
+        // retail MOREBAR is a pager caption, not a scrollbar: "MORE..."
+        // while pages remain, "BACK TO START" on the last page, empty
+        // when everything fits on one page
+        if (auto moreBar = panel.find<UiLabel>("MOREBAR"))
+        {
+            std::string caption;
+            if (inGameMenuBriefingPages.size() > 1)
+            {
+                caption = inGameMenuBriefingPage + 1 == inGameMenuBriefingPages.size() ? "BACK TO START" : "MORE...";
+            }
+            moreBar->get().setText(caption);
+        }
+    }
+
+    void GameScene::populateGameOptionsDialog(UiPanel& panel)
+    {
+        // retail draws a read-only "GameSettings" summary (labels at
+        // x=18 width 110, values at x=140 width 120, rows at y=90
+        // stepping 18) in the screen's default font
+        auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+
+        const auto& localPlayer = simulation.getPlayer(localPlayerId);
+        // campaign missions report their staged difficulty name;
+        // skirmishes report the frontend-selected Difficulty stage
+        auto difficulty = gameParameters.skirmish.difficulty;
+        if (gameParameters.campaign)
+        {
+            auto name = toUpper(gameParameters.campaign->difficulty);
+            difficulty = name == "EASY" ? SkirmishDifficulty::Easy
+                : name == "HARD"         ? SkirmishDifficulty::Hard
+                                         : SkirmishDifficulty::Medium;
+        }
+        auto rows = makeGameOptionsRows(
+            gameParameters.mapName,
+            gameParameters.skirmish.commanderDeath,
+            gameParameters.skirmish.startLocation,
+            simulation.mappingEnabled,
+            simulation.lineOfSightMode,
+            difficulty,
+            static_cast<unsigned int>(localPlayer.startingMetal.value),
+            static_cast<unsigned int>(localPlayer.startingEnergy.value),
+            simulation.maxUnitsPerPlayer);
+
+        int y = 90;
+        unsigned int rowIndex = 0;
+        for (const auto& [label, value] : rows)
+        {
+            auto labelComponent = std::make_unique<UiLabel>(18, y, 110, 15, label, font);
+            labelComponent->setName("RowLabel" + std::to_string(rowIndex));
+            panel.appendChild(std::move(labelComponent));
+
+            auto valueComponent = std::make_unique<UiLabel>(140, y, 120, 15, value, font);
+            valueComponent->setName("RowValue" + std::to_string(rowIndex));
+            panel.appendChild(std::move(valueComponent));
+
+            y += 18;
+            ++rowIndex;
+        }
+    }
+
+    void GameScene::exitToMainMenu()
+    {
+        sceneContext.sceneManager->setNextScene(std::make_shared<MainMenuScene>(
+            sceneContext,
+            audioLookup,
+            static_cast<float>(sceneContext.viewport->width()),
+            static_cast<float>(sceneContext.viewport->height())));
+    }
+
+    void GameScene::restartGame()
+    {
+        sceneContext.sceneManager->setNextScene(std::make_shared<LoadingScene>(
+            sceneContext,
+            audioLookup,
+            AudioService::LoopToken(),
+            gameParameters));
+    }
+
+    void GameScene::onInGameMenuMessage(const std::string& topic, const std::string& controlName, ActivateMessage::Type /*type*/)
+    {
+        if (inGameMenuDialogs.empty())
+        {
+            return;
+        }
+
+        // the topic names the panel that emitted the message -- with a
+        // companion pane open that differs from the stack top
+        const auto& panelName = topic;
+
+        // ARMOPT/COROPT: the retail F2 options panel
+        if (matchesWithSidePrefix("OPT", panelName) || panelName == "ARMOPT")
+        {
+            if (controlName == "OK")
+            {
+                closeInGameMenu();
+            }
+            else if (controlName == "EXIT")
+            {
+                auto dialog = createInGameMenuDialog("EXITMENU");
+                // the stock EXITMENU leaves the Restart gadget's
+                // caption empty; the exe supplies it at runtime
+                if (auto button = dialog->find<UiStagedButton>("RESTART"))
+                {
+                    button->get().setLabel("Restart");
+                    // restart rebuilds the game locally; it cannot
+                    // recreate a network session
+                    if (!isSingleHumanPlayer())
+                    {
+                        button->get().setEnabled(false);
+                    }
+                }
+                pushInGameMenuDialog(std::move(dialog));
+            }
+            else if (controlName == "HELP")
+            {
+                auto dialog = createInGameMenuDialog("HELP");
+                populateHelpDialog(*dialog);
+                pushInGameMenuDialog(std::move(dialog));
+            }
+            else if (controlName == "MISSION")
+            {
+                // retail gates on mission type: campaign missions open
+                // BRIEFING.GUI, skirmish opens the GAMEOPTIONS
+                // "GameSettings" summary instead (TotalA.exe 0x460b7d)
+                if (simulation.missionInfo)
+                {
+                    auto dialog = createInGameMenuDialog("BRIEFING");
+                    // retail binds bitmaps/igmbrief.pcx as the dialog
+                    // background (TotalA.exe 0x460c08-0x460c29); the GUI
+                    // file's panel field is empty
+                    if (sceneContext.vfs->readFile("bitmaps/igmbrief.pcx"))
+                    {
+                        dialog->setBackground(sceneContext.textureService->getBitmapRegion(
+                            "igmbrief", 0, 0, dialog->getWidth(), dialog->getHeight()));
+                    }
+                    populateBriefingDialog(*dialog);
+                    pushInGameMenuDialog(std::move(dialog));
+                }
+                else if (sceneContext.vfs->readFile(sceneContext.pathMapping->guis + "/GAMEOPTIONS.GUI"))
+                {
+                    auto dialog = createInGameMenuDialog("GAMEOPTIONS");
+                    populateGameOptionsDialog(*dialog);
+                    pushInGameMenuDialog(std::move(dialog));
+                }
+                else
+                {
+                    // pre-3.1 data ships no GAMEOPTIONS.GUI; the
+                    // briefing dialog is the closest available screen
+                    auto dialog = createInGameMenuDialog("BRIEFING");
+                    populateBriefingDialog(*dialog);
+                    pushInGameMenuDialog(std::move(dialog));
+                }
+            }
+            else if (controlName == "PREFS")
+            {
+                // retail snapshots the settings block when the options
+                // screen opens; Undo/Cancel restore it, OK/PREV commits
+                inGameMenuInterfaceSnapshot = sceneContext.globalConfig->leftClickInterfaceMode;
+                auto prefsPanel = createInGameMenuDialog("PREFS");
+                // SOUND/VISUALS/MUSIC have no controls backed by the
+                // runtime (no master volume, no music playback, no
+                // renderer options); INTERFACE/SPEEDS has the stock
+                // button-interface staged button, backed by
+                // GlobalConfig.leftClickInterfaceMode
+                for (const auto& buttonName : {"SOUND", "VISUALS", "MUSIC"})
+                {
+                    if (auto button = prefsPanel->find<UiStagedButton>(buttonName))
+                    {
+                        button->get().setEnabled(false);
+                    }
+                }
+                pushInGameMenuDialog(std::move(prefsPanel));
+            }
+            else if (controlName == "SAVEGAME")
+            {
+                pushInGameMenuDialog(createSaveListDialog(true));
+            }
+            else if (controlName == "LOADGAME")
+            {
+                pushInGameMenuDialog(createSaveListDialog(false));
+            }
+            return;
+        }
+
+        // SAVELIST (save entry) / LOADLIST (load pick): both stock
+        // GUIs share the LoadList.GUI layout and control names
+        if (panelName == "SAVELIST" || panelName == "LOADLIST")
+        {
+            if (controlName == "LOAD")
+            {
+                if (inGameMenuSaveListIsSave)
+                {
+                    performSaveGame(*inGameMenuDialogs.back());
+                }
+                else
+                {
+                    performLoadGame(*inGameMenuDialogs.back());
+                }
+            }
+            else if (controlName == "CANCEL")
+            {
+                popInGameMenuDialog();
+            }
+            else if (controlName == "DELETE")
+            {
+                if (auto listBox = inGameMenuDialogs.back()->find<UiListBox>("GAMES"))
+                {
+                    auto selected = listBox->get().getSelectedIndex();
+                    if (selected && *selected < inGameMenuSaveListEntries.size())
+                    {
+                        auto saveName = inGameMenuSaveListEntries[*selected].saveName;
+                        inGameMenuConfirmAction = [this, saveName]() {
+                            if (auto dir = saveGameDirectory())
+                            {
+                                deleteSavedGameFile(*dir, saveName);
+                            }
+                            if (!inGameMenuDialogs.empty())
+                            {
+                                refreshSaveListDialog(*inGameMenuDialogs.back());
+                            }
+                        };
+                        pushInGameMenuDialog(createYesNoDialog("Delete saved game?"));
+                    }
+                }
+            }
+            return;
+        }
+
+        if (panelName == "EXITMENU")
+        {
+            if (controlName == "MAINMENU")
+            {
+                inGameMenuConfirmAction = [this]() { exitToMainMenu(); };
+                pushInGameMenuDialog(createYesNoDialog("Surrender this battle and return to main menu?"));
+            }
+            else if (controlName == "EXITGAME")
+            {
+                inGameMenuConfirmAction = [this]() { sceneContext.sceneManager->requestExit(); };
+                pushInGameMenuDialog(createYesNoDialog("Surrender this battle and exit to Windows?"));
+            }
+            else if (controlName == "RESTART")
+            {
+                auto dialog = createInGameMenuDialog("RESTART");
+                if (auto label = dialog->find<UiLabel>("MISSIONNAME"))
+                {
+                    label->get().setText(gameParameters.mapName);
+                }
+                if (auto label1 = dialog->find<UiLabel>("MISSIONNAME1"))
+                {
+                    label1->get().setText(gameParameters.campaign ? gameParameters.campaign->missionName : gameParameters.mapName);
+                }
+                if (gameParameters.campaign)
+                {
+                    if (auto difficulty = dialog->find<UiStagedButton>("Difficulty"))
+                    {
+                        static const std::array<std::string, 3> difficulties{"Easy", "Medium", "Hard"};
+                        auto it = std::find(difficulties.begin(), difficulties.end(), gameParameters.campaign->difficulty);
+                        difficulty->get().setStage(it == difficulties.end() ? 1 : static_cast<unsigned int>(it - difficulties.begin()));
+                    }
+                }
+                pushInGameMenuDialog(std::move(dialog));
+            }
+            else if (controlName == "CANCEL")
+            {
+                popInGameMenuDialog();
+            }
+            return;
+        }
+
+        if (panelName == "YESORNO")
+        {
+            if (controlName == "CHOICE1")
+            {
+                auto action = inGameMenuConfirmAction;
+                inGameMenuConfirmAction = nullptr;
+                popInGameMenuDialog();
+                if (action)
+                {
+                    action();
+                }
+            }
+            else if (controlName == "CHOICE2")
+            {
+                inGameMenuConfirmAction = nullptr;
+                popInGameMenuDialog();
+            }
+            return;
+        }
+
+        if (panelName == "RESTART")
+        {
+            if (controlName == "Difficulty")
+            {
+                if (auto difficulty = inGameMenuDialogs.back()->find<UiStagedButton>("Difficulty"))
+                {
+                    difficulty->get().setStage((difficulty->get().getStage() + 1) % 3);
+                }
+            }
+            else if (controlName == "RESTART")
+            {
+                if (gameParameters.campaign)
+                {
+                    if (auto difficulty = inGameMenuDialogs.back()->find<UiStagedButton>("Difficulty"))
+                    {
+                        static const std::array<std::string, 3> difficulties{"Easy", "Medium", "Hard"};
+                        gameParameters.campaign->difficulty = difficulties[difficulty->get().getStage() % difficulties.size()];
+                    }
+                }
+                restartGame();
+            }
+            else if (controlName == "CANCEL")
+            {
+                popInGameMenuDialog();
+            }
+            return;
+        }
+
+        if (panelName == "HELP")
+        {
+            if (controlName == "OK")
+            {
+                popInGameMenuDialog();
+            }
+            else if (controlName == "Page")
+            {
+                // staged buttons are data-owned: the click message
+                // cycles the stage here, as in the main menu
+                if (auto page = inGameMenuDialogs.back()->find<UiStagedButton>("Page"))
+                {
+                    page->get().setStage((page->get().getStage() + 1) % 3);
+                }
+                populateHelpDialog(*inGameMenuDialogs.back());
+            }
+            return;
+        }
+
+        if (panelName == "PREFS")
+        {
+            if (controlName == "PREV")
+            {
+                // retail PREV (labelled "OK") commits live settings and
+                // writes them persistently ("Interface Type" registry
+                // value in retail; rwe.cfg here)
+                commitInterfaceModePreference();
+                popInGameMenuDialogThrough("PREFS");
+            }
+            else if (controlName == "CANCEL")
+            {
+                // restores the options-entry snapshot, no persistence
+                sceneContext.globalConfig->leftClickInterfaceMode = inGameMenuInterfaceSnapshot;
+                popInGameMenuDialogThrough("PREFS");
+            }
+            else if (controlName == "SPEEDS")
+            {
+                // PREFS's INTERFACE-labelled gadget is named SPEEDS and
+                // opens the stock SPEEDSRT screen as a non-modal
+                // companion pane: the PREFS strip stays interactive
+                // beside it (retail 0x45ed50 composes the same way)
+                while (!inGameMenuDialogs.empty() && inGameMenuDialogCompanions.back())
+                {
+                    popInGameMenuDialog();
+                }
+                auto dialog = createInGameMenuDialog("SPEEDSRT");
+                populateInterfaceDialog(*dialog);
+                pushInGameMenuDialog(std::move(dialog), true);
+            }
+            return;
+        }
+
+        if (panelName == "SPEEDSRT")
+        {
+            auto setInterfaceStage = [this]() {
+                if (auto leftClick = inGameMenuDialogs.back()->find<UiStagedButton>("LEFTCLICK"))
+                {
+                    leftClick->get().setStage(sceneContext.globalConfig->leftClickInterfaceMode ? 0 : 1);
+                }
+            };
+
+            if (controlName == "LEFTCLICK")
+            {
+                sceneContext.globalConfig->leftClickInterfaceMode = !sceneContext.globalConfig->leftClickInterfaceMode;
+                setInterfaceStage();
+            }
+            else if (controlName == "RESTORE")
+            {
+                sceneContext.globalConfig->leftClickInterfaceMode = true;
+                setInterfaceStage();
+            }
+            else if (controlName == "UNDO")
+            {
+                sceneContext.globalConfig->leftClickInterfaceMode = inGameMenuInterfaceSnapshot;
+                setInterfaceStage();
+            }
+            return;
+        }
+
+        if (panelName == "BRIEFING")
+        {
+            if (controlName == "OK")
+            {
+                popInGameMenuDialogThrough(panelName);
+            }
+            else if (controlName == "TextRegion" || controlName == "MOREBAR")
+            {
+                // retail's briefing pager plays Options and advances on
+                // any TextRegion/MOREBAR click, wrapping at the end
+                uiFactory.playButtonSound("OPTIONS");
+                if (inGameMenuBriefingPages.size() > 1)
+                {
+                    inGameMenuBriefingPage = (inGameMenuBriefingPage + 1) % inGameMenuBriefingPages.size();
+                    for (auto& dialog : inGameMenuDialogs)
+                    {
+                        if (dialog->getName() == "BRIEFING")
+                        {
+                            applyBriefingPage(*dialog);
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        if (panelName == "GAMEOPTIONS")
+        {
+            if (controlName == "OK")
+            {
+                popInGameMenuDialogThrough(panelName);
+            }
+            return;
+        }
     }
 
     UnitState& GameScene::getUnit(UnitId id)
@@ -2836,8 +5990,11 @@ namespace rwe
 
     bool GameScene::isEnemy(UnitId id) const
     {
-        // TODO: consider allies/teams here
-        return !getUnit(id).isOwnedBy(localPlayerId);
+        // retail's alliedWith test: units owned by a different player
+        // in the same ally group are friendly, not enemies -- this
+        // gates the attack/reclaim/capture contexts against allies and
+        // admits them to the guard/repair contexts
+        return !simulation.areAllied(localPlayerId, getUnit(id).owner);
     }
 
     bool GameScene::isFriendly(UnitId id) const
@@ -2949,22 +6106,20 @@ namespace rwe
                     if (unit)
                     {
                         const auto& unitDefinition = simulation.unitDefinitions.at(unit->get().unitType);
-                        unitGuiInfos.insert_or_assign(e.unitId, UnitGuiInfo{unitDefinition.builder ? UnitGuiInfo::Section::Build : UnitGuiInfo::Section::Orders, 0});
+                        unitGuiInfos.insert_or_assign(e.unitId, initialUnitGuiInfo(unitDefinition, unitDefinitionHasStockpileWeapon(simulation, unitDefinition)));
                     }
                 },
 
                 [&](const UnitDiedEvent& e) {
-                    const auto& unitDefinition = simulation.unitDefinitions.at(e.unitType);
-
-                    if (!unitDefinition.explodeAs.empty())
+                    if (!e.explosionWeapon.empty())
                     {
                         switch (e.deathType)
                         {
                             case UnitDiedEvent::DeathType::NormalExploded:
-                                doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Normal);
+                                doProjectileImpact(e.position, e.explosionWeapon, ImpactType::Normal);
                                 break;
                             case UnitDiedEvent::DeathType::WaterExploded:
-                                doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Water);
+                                doProjectileImpact(e.position, e.explosionWeapon, ImpactType::Water);
                                 break;
                             case UnitDiedEvent::DeathType::Deleted:
                                 // do nothing
@@ -2995,8 +6150,62 @@ namespace rwe
                         playUnitNotificationSound(unit->get().owner, unit->get().unitType, UnitSoundType::Repair);
                     }
                 },
+                [&](const UnitStartedReclaimingEvent& e) {
+                    auto unit = tryGetUnit(e.unitId);
+                    if (unit)
+                    {
+                        // original TA maps the reclaim work loop to the
+                        // unit's "working" sound (working=reclaim1 in SOUND.TDF)
+                        playUnitNotificationSound(unit->get().owner, unit->get().unitType, UnitSoundType::Working);
+                    }
+                },
+                [&](const UnitStartedCapturingEvent& e) {
+                    auto unit = tryGetUnit(e.unitId);
+                    if (unit)
+                    {
+                        // retail's unit-response table gives capture
+                        // its own sound key (TotalA.exe state table
+                        // 0x5086e8 index 15 -> SOUND.TDF
+                        // "capture"=capture1/2), dispatched by the
+                        // unit-event handler at 0x48b1aa
+                        playUnitNotificationSound(unit->get().owner, unit->get().unitType, UnitSoundType::Capture);
+                    }
+                },
+                [&](const UnitSelfDestructCountdownEvent& e) {
+                    auto unit = tryGetUnit(e.unitId);
+                    if (unit)
+                    {
+                        static const UnitSoundType countdownSounds[] = {
+                            UnitSoundType::Count0,
+                            UnitSoundType::Count1,
+                            UnitSoundType::Count2,
+                            UnitSoundType::Count3,
+                            UnitSoundType::Count4,
+                            UnitSoundType::Count5,
+                        };
+                        const auto index = std::clamp(e.secondsRemaining, 0, 5);
+                        playUnitNotificationSound(unit->get().owner, unit->get().unitType, countdownSounds[index]);
+                    }
+                },
+                [&](const UnitSelfDestructCancelledEvent& e) {
+                    auto unit = tryGetUnit(e.unitId);
+                    if (unit)
+                    {
+                        playUnitNotificationSound(unit->get().owner, unit->get().unitType, UnitSoundType::CancelDestruct);
+                    }
+                },
                 [&](const ProjectileSpawnedEvent& e) {
                     projectileRenderInfos.insert({e.projectileId, ProjectileRenderInfo{getGameTime()}});
+                },
+                [&](const FeatureEffectEvent& e) {
+                    if (e.ignition)
+                    {
+                        if (auto sound = gameMediaDatabase.tryGetSoundHandle("treeburn"))
+                        {
+                            playSoundAt(simVectorToFloat(e.position), *sound);
+                        }
+                    }
+                    else { createLightSmoke(simVectorToFloat(e.position)); }
                 },
                 [&](const ProjectileDiedEvent& e) {
                     const auto& weaponMediaInfo = gameMediaDatabase.getWeapon(e.weaponType);
@@ -3105,11 +6314,32 @@ namespace rwe
         auto unit = tryGetUnit(unitId);
         if (unit)
         {
-            unit->get().modifyBuildQueue(unitType, count);
+            applyBasicPlayerUnitCommand(unit->get(), PlayerUnitCommand::ModifyBuildQueue{count, unitType});
 
             updateUnconfirmedBuildQueueDelta(unitId, unitType, -count);
             refreshBuildGuiTotal(unitId, unitType);
         }
+    }
+
+    void GameScene::modifyWeaponQueue(UnitId unitId, int count)
+    {
+        auto unit = tryGetUnit(unitId);
+        if (!unit)
+        {
+            return;
+        }
+
+        applyModifyWeaponQueue(unit->get(), count);
+
+        if (auto it = unconfirmedWeaponQueueDelta.find(unitId); it != unconfirmedWeaponQueueDelta.end())
+        {
+            it->second -= count;
+            if (it->second == 0)
+            {
+                unconfirmedWeaponQueueDelta.erase(it);
+            }
+        }
+        refreshWeaponGuiTotal(unitId);
     }
 
     struct CorpseSpawnInfo
@@ -3171,6 +6401,36 @@ namespace rwe
             p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<RepairCursorMode>(v)); }));
         }
 
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "RECLAIM"))
+        {
+            p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<ReclaimCursorMode>(v)); }));
+        }
+
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "PATROL"))
+        {
+            p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<PatrolCursorMode>(v)); }));
+        }
+
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "BLAST"))
+        {
+            p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<CommandFireCursorMode>(v)); }));
+        }
+
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "CAPTURE"))
+        {
+            p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<CaptureCursorMode>(v)); }));
+        }
+
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "LOAD"))
+        {
+            p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<LoadCursorMode>(v)); }));
+        }
+
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "UNLOAD"))
+        {
+            p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<UnloadCursorMode>(v)); }));
+        }
+
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "FIREORD"))
         {
             p->get().addSubscription(fireOrders.subscribe([&p = p->get()](const auto& v) {
@@ -3193,6 +6453,35 @@ namespace rwe
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "ONOFF"))
         {
             p->get().addSubscription(onOff.subscribe([&p = p->get()](const auto& v) { p.setStage(v ? 1 : 0); }));
+        }
+
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "CLOAK"))
+        {
+            p->get().addSubscription(cloakStage.subscribe([&p = p->get()](const auto& v) {
+                // mask value 3 (no cloakable selected) greys the strip
+                // via setEnabled, it is never pushed as a stage; clamp
+                // the mixed stage for GUI files with fewer stages
+                auto stageCount = p.getStageCount();
+                if (stageCount > 0)
+                {
+                    p.setStage(std::min(v, stageCount - 1));
+                } }));
+        }
+
+        // retail's orders-panel pass greys or deactivates gadgets the
+        // selection cannot use (TotalA.exe 0x41a130-0x41a48d, fed by
+        // the OR-aggregated capability mask built at 0x41b2e0)
+        {
+            std::vector<const UnitDefinition*> selectedDefinitions;
+            for (const auto& unitId : selectedUnits)
+            {
+                if (auto unit = simulation.tryGetUnitState(unitId))
+                {
+                    selectedDefinitions.push_back(&simulation.unitDefinitions.at(unit->get().unitType));
+                }
+            }
+            const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
+            applyOrdersPanelCapabilities(*currentPanel, sidePrefix, aggregateOrdersPanelCapabilities(selectedDefinitions, simulation.weaponDefinitions));
         }
 
         currentPanel->groupMessages().subscribe([this](const auto& msg) {
@@ -3283,6 +6572,111 @@ namespace rwe
                 cursorMode.next(RepairCursorMode());
             }
         }
+        else if (matchesWithSidePrefix("RECLAIM", message))
+        {
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<ReclaimCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(ReclaimCursorMode());
+            }
+        }
+        else if (matchesWithSidePrefix("PATROL", message))
+        {
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<PatrolCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(PatrolCursorMode());
+            }
+        }
+        else if (matchesWithSidePrefix("CAPTURE", message))
+        {
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<CaptureCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(CaptureCursorMode());
+            }
+        }
+        else if (matchesWithSidePrefix("LOAD", message))
+        {
+            // retail plays `immediateorders` for LOAD (TotalA.exe
+            // 0x41a0ea), unlike the other order-panel modes
+            if (sounds.immediateOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.immediateOrders);
+            }
+
+            if (std::holds_alternative<LoadCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitCanLoad(simulation, id); }))
+            {
+                // the retail gadget handler gates mode 6 on a
+                // selected unit carrying the CanLoad bit (0x41a4xx)
+                cursorMode.next(LoadCursorMode());
+            }
+        }
+        else if (matchesWithSidePrefix("UNLOAD", message))
+        {
+            // retail plays `specialorders` for UNLOAD (0x41a072)
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<UnloadCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitCanLoad(simulation, id); }))
+            {
+                // retail's UNLOAD gadget stays enabled whenever a
+                // transport is selected -- cargo presence is not
+                // checked at arm time (TotalA.exe 0x41a403 block);
+                // an empty transport simply drops nothing
+                cursorMode.next(UnloadCursorMode());
+            }
+        }
+        else if (matchesWithSidePrefix("BLAST", message))
+        {
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<CommandFireCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(CommandFireCursorMode());
+            }
+        }
         else if (matchesWithSidePrefix("STOP", message))
         {
             if (sounds.immediateOrders)
@@ -3323,6 +6717,24 @@ namespace rwe
                 auto& u = getUnit(selectedUnit);
                 auto newOnOff = !u.activated;
                 localPlayerSetOnOff(selectedUnit, newOnOff);
+            }
+        }
+        else if (matchesWithSidePrefix("CLOAK", message))
+        {
+            // retail 0x41a72e: `specialorders` sound, then mask bits
+            // 3:4 == 0 issues CLOAK_ON and any other value CLOAK_OFF --
+            // the mixed stage (2) can only decloak, so multi-selected
+            // cloakables cannot be cloaked through the strip
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            const auto stage = cloakPanelStage(simulation, selectedUnits);
+            const auto on = stage == 0;
+            for (const auto& selectedUnit : selectedUnits)
+            {
+                localPlayerSetCloak(selectedUnit, on);
             }
         }
         else if (matchesWithSidePrefix("NEXT", message))
@@ -3404,6 +6816,20 @@ namespace rwe
                 setNextPanel(uiFactory.panelFromGuiFile(sidePrefix + "GEN"));
             }
         }
+        else if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit && getWeaponBuildGadgetName(*selectedUnit) == message)
+        {
+            // stockpile weapon button (GUI commonattribs=8, e.g.
+            // ARMMAKENUKE/ARMMAKEANTI): primary click queues one round,
+            // shift queues five, secondary cancels -- the same
+            // click-count convention as factory build buttons
+            if (sounds.addBuild)
+            {
+                sceneContext.audioService->playSound(*sounds.addBuild);
+            }
+
+            int count = (isShiftDown() ? 5 : 1) * (type == ActivateMessage::Type::Primary ? 1 : -1);
+            localPlayerModifyWeaponQueue(*selectedUnit, count);
+        }
         else if (isValidUnitType(simulation, message))
         {
             if (sounds.addBuild)
@@ -3482,6 +6908,104 @@ namespace rwe
         {
             replaceUnitSelection(units);
         }
+    }
+
+    void GameScene::addSelectableUnitsToSelection(const std::function<bool(const UnitState&, const UnitDefinition&)>& predicate)
+    {
+        // the retail Ctrl+A/Z/P/R/W handlers iterate the player unit
+        // list and set each matching unit's select bit without
+        // touching the rest (TotalA.exe 0x48bd50, 0x48be00, 0x48bf30)
+        std::unordered_set<UnitId> units(selectedUnits);
+        for (const auto& [unitId, unit] : simulation.units)
+        {
+            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+            if (unit.isSelectableBy(unitDefinition, localPlayerId) && predicate(unit, unitDefinition))
+            {
+                units.insert(unitId);
+            }
+        }
+        replaceUnitSelection(units);
+    }
+
+    void GameScene::selectAllEligibleUnits()
+    {
+        addSelectableUnitsToSelection([](const UnitState&, const UnitDefinition&) {
+            return true;
+        });
+    }
+
+    void GameScene::selectUnitsOnScreen()
+    {
+        // retail Ctrl+S clears every unit's select bit, then sets it on
+        // eligible owned units whose screen position is inside the world
+        // viewport (TotalA.exe 0x48c030)
+        const auto& matrix = computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+        std::unordered_set<UnitId> units;
+        for (const auto& [unitId, unit] : simulation.units)
+        {
+            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+            if (!unit.isSelectableBy(unitDefinition, localPlayerId))
+            {
+                continue;
+            }
+
+            const auto clipPos = matrix * simVectorToFloat(unit.position);
+            const auto viewportPos = worldViewport.toViewportSpace(clipPos.x, clipPos.y);
+            if (viewportPos.x >= 0 && viewportPos.x < static_cast<int>(worldViewport.width())
+                && viewportPos.y >= 0 && viewportPos.y < static_cast<int>(worldViewport.height()))
+            {
+                units.insert(unitId);
+            }
+        }
+        replaceUnitSelection(units);
+    }
+
+    void GameScene::selectUnitsOfSelectedTypes()
+    {
+        // retail Ctrl+Z (0x48be00) adds every eligible owned unit whose
+        // type matches a currently-selected unit
+        std::unordered_set<std::string> types;
+        for (const auto& unitId : selectedUnits)
+        {
+            if (auto unit = tryGetUnit(unitId); unit)
+            {
+                types.insert(unit->get().unitType);
+            }
+        }
+        if (types.empty())
+        {
+            return;
+        }
+        addSelectableUnitsToSelection([&types](const UnitState& unit, const UnitDefinition&) {
+            return types.count(unit.unitType) != 0;
+        });
+    }
+
+    void GameScene::selectArmedAircraft()
+    {
+        // readme.txt: Ctrl+P selects all aircraft that have weapons
+        addSelectableUnitsToSelection([](const UnitState&, const UnitDefinition& def) {
+            return def.canFly && def.canAttack;
+        });
+    }
+
+    void GameScene::selectRadarSonarUnits()
+    {
+        // readme.txt: Ctrl+R selects all radar, radar jammers, sonar,
+        // and sonar jammers
+        addSelectableUnitsToSelection([](const UnitState&, const UnitDefinition& def) {
+            return def.radarDistance > 0_ss || def.sonarDistance > 0_ss
+                || def.radarDistanceJam > 0_ss || def.sonarDistanceJam > 0_ss;
+        });
+    }
+
+    void GameScene::selectArmedMobileUnits()
+    {
+        // readme.txt: Ctrl+W selects all mobile units that have weapons
+        // except the Commander
+        addSelectableUnitsToSelection([](const UnitState&, const UnitDefinition& def) {
+            return def.isMobile && def.canAttack && !def.commander;
+        });
     }
 
     void GameScene::toggleUnitSelection(const rwe::UnitId& unitId)
@@ -3569,6 +7093,10 @@ namespace rwe
 
     void GameScene::onSelectedUnitsChanged()
     {
+        // dead units are removed from the sim before their death
+        // events are processed, so the selection can hold stale ids
+        purgeStaleSelectedUnits(selectedUnits, simulation);
+
         if (selectedUnits.empty())
         {
             const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
@@ -3579,6 +7107,7 @@ namespace rwe
             const auto& unit = getUnit(*unitId);
             fireOrders.next(unit.fireOrders);
             onOff.next(unit.activated);
+            cloakStage.next(cloakPanelStage(simulation, selectedUnits));
 
             const auto& guiInfo = getGuiInfo(*unitId);
             auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage);
@@ -3626,6 +7155,85 @@ namespace rwe
                 button->get().setLabel(total > 0 ? "+" + std::to_string(total) : "");
             }
         }
+    }
+
+    std::optional<std::string> GameScene::getWeaponBuildGadgetName(UnitId unitId) const
+    {
+        auto unit = tryGetUnit(unitId);
+        if (!unit)
+        {
+            return std::nullopt;
+        }
+        auto guiIt = unitGuiInfos.find(unitId);
+        if (guiIt == unitGuiInfos.end())
+        {
+            return std::nullopt;
+        }
+        auto page = getBuilderGui(builderGuisDatabase, unit->get().unitType, guiIt->second.currentBuildPage);
+        if (!page)
+        {
+            return std::nullopt;
+        }
+        for (const auto& e : page->get())
+        {
+            if ((e.common.commonAttribs & GuiCommonAttrib::WeaponBuildButton)
+                && (e.common.attribs & GuiButtonAttrib::BehaviorBuildButton))
+            {
+                return e.common.name;
+            }
+        }
+        return std::nullopt;
+    }
+
+    unsigned int GameScene::getWeaponStockpileTotal(UnitId unitId) const
+    {
+        auto unit = tryGetUnit(unitId);
+        if (!unit)
+        {
+            return 0;
+        }
+        const auto& u = unit->get();
+        unsigned int total = 0;
+        for (const auto& weapon : u.weapons)
+        {
+            if (weapon && simulation.weaponDefinitions.at(weapon->weaponType).stockpile)
+            {
+                total += weapon->stockpileCount;
+            }
+        }
+        for (const auto& order : u.backgroundOrders)
+        {
+            if (auto* buildWeapon = std::get_if<BuildWeaponOrder>(&order))
+            {
+                total += buildWeapon->remaining;
+            }
+        }
+        return total;
+    }
+
+    void GameScene::refreshWeaponGuiTotal(UnitId unitId)
+    {
+        if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit != unitId)
+        {
+            return;
+        }
+        auto gadget = getWeaponBuildGadgetName(unitId);
+        if (!gadget)
+        {
+            return;
+        }
+        auto button = currentPanel->find<UiStagedButton>(*gadget);
+        if (!button)
+        {
+            return;
+        }
+        int unconfirmed = 0;
+        if (auto it = unconfirmedWeaponQueueDelta.find(unitId); it != unconfirmedWeaponQueueDelta.end())
+        {
+            unconfirmed = it->second;
+        }
+        auto total = static_cast<int>(getWeaponStockpileTotal(unitId)) + unconfirmed;
+        button->get().setLabel(total > 0 ? "+" + std::to_string(total) : "");
     }
 
     void GameScene::updateUnconfirmedBuildQueueDelta(UnitId unitId, const std::string& unitType, int count)
@@ -3686,6 +7294,20 @@ namespace rwe
             }
         }
 
+        // weapon build gadgets carry the stockpile counter (built
+        // rounds + queued rounds), not a factory buildQueue total
+        if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit)
+        {
+            if (auto gadget = getWeaponBuildGadgetName(*selectedUnit); gadget)
+            {
+                if (auto button = panel->find<UiStagedButton>(*gadget); button)
+                {
+                    auto total = getWeaponStockpileTotal(*selectedUnit);
+                    button->get().setLabel(total > 0 ? "+" + std::to_string(total) : "");
+                }
+            }
+        }
+
         return panel;
     }
 
@@ -3696,11 +7318,11 @@ namespace rwe
             [&](const PlayerUnitCommand& c) {
                 processUnitCommand(c);
             },
-            [](const PlayerPauseGameCommand&) {
-                // TODO
+            [&](const PlayerPauseGameCommand&) {
+                gamePaused = true;
             },
-            [](const PlayerUnpauseGameCommand&) {
-                // TODO
+            [&](const PlayerUnpauseGameCommand&) {
+                gamePaused = false;
             });
     }
 
@@ -3725,6 +7347,9 @@ namespace rwe
             [&](const PlayerUnitCommand::Stop&) {
                 stopUnit(unitCommand.unit);
             },
+            [&](const PlayerUnitCommand::RemoveOrder& c) {
+                removeUnitOrderAt(unitCommand.unit, c.index);
+            },
             [&](const PlayerUnitCommand::SetFireOrders& c) {
                 setFireOrders(unitCommand.unit, c.orders);
             },
@@ -3737,6 +7362,15 @@ namespace rwe
                 {
                     simulation.deactivateUnit(unitCommand.unit);
                 }
+            },
+            [&](const PlayerUnitCommand::SetCloak& c) {
+                setCloak(unitCommand.unit, c.on);
+            },
+            [&](const PlayerUnitCommand::ToggleSelfDestruct&) {
+                toggleSelfDestruct(unitCommand.unit);
+            },
+            [&](const PlayerUnitCommand::ModifyWeaponQueue& c) {
+                modifyWeaponQueue(unitCommand.unit, c.count);
             });
     }
 
@@ -3869,6 +7503,38 @@ namespace rwe
 
         auto newCameraPos = cameraConstraint.clamp(Vector2f(x, z));
         worldCameraState.position = Vector3f(newCameraPos.x, worldCameraState.position.y, newCameraPos.y);
+    }
+
+    std::optional<std::string> GameScene::getStockpileWeaponUnderCursor() const
+    {
+        auto selectedUnit = getSingleSelectedUnit();
+        if (!selectedUnit)
+        {
+            return std::nullopt;
+        }
+        auto gadget = getWeaponBuildGadgetName(*selectedUnit);
+        if (!gadget)
+        {
+            return std::nullopt;
+        }
+
+        auto cursorPosition = getMousePosition();
+        auto control = currentPanel->findAtPosition<UiStagedButton>(cursorPosition.x, cursorPosition.y);
+        if (!control || control->get().getName() != *gadget)
+        {
+            return std::nullopt;
+        }
+
+        // the gadget stockpiles the unit's stockpile weapon
+        const auto& unit = getUnit(*selectedUnit);
+        for (const auto& weapon : unit.weapons)
+        {
+            if (weapon && simulation.weaponDefinitions.at(weapon->weaponType).stockpile)
+            {
+                return weapon->weaponType;
+            }
+        }
+        return std::nullopt;
     }
 
     std::optional<std::string> GameScene::getUnitBuildButtonUnderCursor() const

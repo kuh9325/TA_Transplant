@@ -17,6 +17,11 @@ namespace rwe
 
         void render(UiRenderService& context) const override;
 
+        bool acceptsMouseInput() const override
+        {
+            return false;
+        }
+
         void setBackground(std::shared_ptr<Sprite> newBackground);
         void clearBackground();
     };

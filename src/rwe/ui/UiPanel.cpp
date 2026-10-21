@@ -1,9 +1,56 @@
 #include "UiPanel.h"
+#include <SDL3/SDL_keyboard.h>
 #include <algorithm>
+#include <rwe/ui/UiListBox.h>
 #include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
+    namespace
+    {
+        Rectangle2f componentRect(UiComponent& c)
+        {
+            return Rectangle2f::fromTopLeft(
+                static_cast<float>(c.getX()),
+                static_cast<float>(c.getY()),
+                static_cast<float>(c.getWidth()),
+                static_cast<float>(c.getHeight()));
+        }
+
+        /**
+         * Subtracts sibling rect s from rect a, when s cuts cleanly
+         * across one of a's edges. Overlaps that do not span an edge
+         * leave a unchanged.
+         */
+        Rectangle2f subtractClipRect(const Rectangle2f& a, const Rectangle2f& s)
+        {
+            bool spansX = s.left() <= a.left() && s.right() >= a.right();
+            bool spansY = s.top() <= a.top() && s.bottom() >= a.bottom();
+
+            // s covers a's bottom edge
+            if (spansX && s.top() > a.top() && s.top() < a.bottom() && s.bottom() >= a.bottom())
+            {
+                return Rectangle2f::fromTLBR(a.top(), a.left(), s.top(), a.right());
+            }
+            // s covers a's top edge
+            if (spansX && s.top() <= a.top() && s.bottom() > a.top() && s.bottom() < a.bottom())
+            {
+                return Rectangle2f::fromTLBR(s.bottom(), a.left(), a.bottom(), a.right());
+            }
+            // s covers a's right edge
+            if (spansY && s.left() > a.left() && s.left() < a.right() && s.right() >= a.right())
+            {
+                return Rectangle2f::fromTLBR(a.top(), a.left(), a.bottom(), s.left());
+            }
+            // s covers a's left edge
+            if (spansY && s.left() <= a.left() && s.right() > a.left() && s.right() < a.right())
+            {
+                return Rectangle2f::fromTLBR(a.top(), s.right(), a.bottom(), a.right());
+            }
+            return a;
+        }
+    }
+
     UiPanel::UiPanel(int posX, int posY, unsigned int sizeX, unsigned int sizeY)
         : UiComponent(posX, posY, sizeX, sizeY)
     {
@@ -54,7 +101,10 @@ namespace rwe
 
         for (const auto& i : children)
         {
-            i->render(graphics);
+            if (!i->isHidden())
+            {
+                i->render(graphics);
+            }
         }
 
         graphics.popMatrix();
@@ -69,7 +119,7 @@ namespace rwe
         for (std::size_t i = 0; i < size; ++i)
         {
             auto& c = children[i];
-            if (c->contains(event.x, event.y))
+            if (!c->isHidden() && c->acceptsMouseInput() && c->contains(event.x, event.y))
             {
                 setFocus(i);
                 c->mouseDown(event);
@@ -91,19 +141,63 @@ namespace rwe
         (*focusedChild)->mouseUp(event);
     }
 
-    void UiPanel::keyDown(KeyEvent event)
+    bool UiPanel::keyDown(KeyEvent event)
     {
-        for (auto& e : children)
+        // retail dialog rule: while a TextBox owns keyboard focus it
+        // receives every key exclusively and sibling button quickkeys
+        // are suppressed; Alt-held keys still reach quickkeys
+        // (TotalA.exe 0x4a70a7 gates the quickkey compare on the focused
+        // gadget's type plus GetAsyncKeyState(VK_MENU)). Gadget kinds
+        // that do not track focus report capturesTextInput()==false and
+        // fall through to the broadcast unchanged.
+        if (focusedChild && (*focusedChild)->capturesTextInput()
+            && (SDL_GetModState() & SDL_KMOD_ALT) == 0)
         {
-            e->keyDown(event);
+            auto* focused = *focusedChild;
+            bool handled = focused->keyDown(event);
+            // a TextBox releases focus on Enter/Escape; drop the stale
+            // pointer so later keys broadcast normally again
+            if (!focused->isFocused())
+            {
+                focusedChild = std::nullopt;
+            }
+            return handled;
         }
+
+        // a child's handler may append or remove children mid-broadcast
+        // (dialog paging, message-driven rebuilds); advance only when
+        // slot i still holds the dispatched child, so removals shift
+        // the next unvisited child into the slot rather than skipping it
+        bool handled = false;
+        for (std::size_t i = 0; i < children.size();)
+        {
+            auto* e = children[i].get();
+            if (!e->isHidden())
+            {
+                bool childHandled = e->keyDown(event);
+                handled = childHandled || handled;
+            }
+            if (i < children.size() && children[i].get() == e)
+            {
+                ++i;
+            }
+        }
+        return handled;
     }
 
     void UiPanel::keyUp(KeyEvent event)
     {
-        for (auto& e : children)
+        for (std::size_t i = 0; i < children.size();)
         {
-            e->keyUp(event);
+            auto* e = children[i].get();
+            if (!e->isHidden())
+            {
+                e->keyUp(event);
+            }
+            if (i < children.size() && children[i].get() == e)
+            {
+                ++i;
+            }
         }
     }
 
@@ -114,15 +208,23 @@ namespace rwe
         event.x -= posX;
         event.y -= posY;
 
-        for (auto& e : children)
+        for (std::size_t i = 0; i < children.size();)
         {
-            e->mouseMove(event);
+            auto* e = children[i].get();
+            if (!e->isHidden())
+            {
+                e->mouseMove(event);
+            }
+            if (i < children.size() && children[i].get() == e)
+            {
+                ++i;
+            }
         }
     }
 
     void UiPanel::focus()
     {
-        if (!focusedChild)
+        if (focusedChild)
         {
             (*focusedChild)->focus();
         }
@@ -130,7 +232,7 @@ namespace rwe
 
     void UiPanel::unfocus()
     {
-        if (!focusedChild)
+        if (focusedChild)
         {
             (*focusedChild)->unfocus();
         }
@@ -144,6 +246,30 @@ namespace rwe
             this->uiMessage(groupMessage);
             this->groupMessagesSubject.next(groupMessage);
         });
+
+        updateListBoxClipRects();
+    }
+
+    void UiPanel::updateListBoxClipRects()
+    {
+        for (std::size_t i = 0; i < children.size(); ++i)
+        {
+            auto* listBox = dynamic_cast<UiListBox*>(children[i].get());
+            if (listBox == nullptr)
+            {
+                continue;
+            }
+
+            auto clip = componentRect(*listBox);
+            for (std::size_t j = i + 1; j < children.size(); ++j)
+            {
+                if (auto* other = dynamic_cast<UiListBox*>(children[j].get()); other != nullptr)
+                {
+                    clip = subtractClipRect(clip, componentRect(*other));
+                }
+            }
+            listBox->setClipRect(clip);
+        }
     }
 
     void UiPanel::setFocus(std::size_t controlIndex)
@@ -171,9 +297,14 @@ namespace rwe
 
     void UiPanel::update(float dt)
     {
-        for (auto& c : children)
+        for (std::size_t i = 0; i < children.size();)
         {
-            c->update(dt);
+            auto* e = children[i].get();
+            e->update(dt);
+            if (i < children.size() && children[i].get() == e)
+            {
+                ++i;
+            }
         }
     }
 
@@ -189,9 +320,17 @@ namespace rwe
 
     void UiPanel::uiMessage(const GroupMessage& message)
     {
-        for (auto& c : children)
+        for (std::size_t i = 0; i < children.size();)
         {
-            c->uiMessage(message);
+            auto* c = children[i].get();
+            if (!c->isHidden())
+            {
+                c->uiMessage(message);
+            }
+            if (i < children.size() && children[i].get() == c)
+            {
+                ++i;
+            }
         }
     }
 
@@ -208,6 +347,19 @@ namespace rwe
                 children.end(),
                 [&prefix](const auto& e) { return startsWith(e->getName(), prefix); }),
             children.end());
+
+        // the focused child may have been among the removed entries;
+        // dropping the stale pointer keeps mouseUp/wheel dispatch safe
+        if (focusedChild)
+        {
+            auto* focused = *focusedChild;
+            if (std::none_of(children.begin(), children.end(), [focused](const auto& c) { return c.get() == focused; }))
+            {
+                focusedChild = std::nullopt;
+            }
+        }
+
+        updateListBoxClipRects();
     }
 
     void UiPanel::setFocusByName(const std::string& name)
@@ -217,6 +369,26 @@ namespace rwe
         {
             setFocus(it - children.begin());
         }
+    }
+
+    void UiPanel::setEscDefault(const std::string& name)
+    {
+        escDefault = name;
+    }
+
+    void UiPanel::setCrDefault(const std::string& name)
+    {
+        crDefault = name;
+    }
+
+    const std::string& UiPanel::getEscDefault() const
+    {
+        return escDefault;
+    }
+
+    const std::string& UiPanel::getCrDefault() const
+    {
+        return crDefault;
     }
 
     Observable<GroupMessage>& UiPanel::groupMessages()

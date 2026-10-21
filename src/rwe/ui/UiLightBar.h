@@ -19,6 +19,11 @@ namespace rwe
 
         void render(UiRenderService& context) const override;
 
+        bool acceptsMouseInput() const override
+        {
+            return false;
+        }
+
         void setPercentComplete(float percent);
     };
 }

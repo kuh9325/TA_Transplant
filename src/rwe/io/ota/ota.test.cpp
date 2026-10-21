@@ -409,4 +409,176 @@ namespace rwe
             }
         }
     }
+
+    TEST_CASE("parseOta campaign mission data")
+    {
+        std::string input = R"TDF(
+[GlobalHeader]
+    {
+    missionname=1: Example Mission;
+    missiondescription=;
+    planet=Green planet;
+    missionhint=hint.txt;
+    brief=BriefingName;
+    narration=narr01;
+    glamour=glam01;
+    lineofsight=1;
+    mapping=1;
+    tidalstrength=0;
+    solarstrength=128;
+    lavaworld=0;
+    killmul=50;
+    timemul=0;
+    minwindspeed=300;
+    maxwindspeed=2000;
+    gravity=112;
+    numplayers=2;
+    size=5 x 6;
+    memory=16 mb;
+    useonlyunits=EX01.tdf;
+    MoveUnitToRadius=ANYTYPE, 992, 656, 64;
+    AllUnitsKilled=1;
+    AllUnitsKilledOfType=EXMGATE;
+    SCHEMACOUNT=1;
+    [Schema 0]
+        {
+        Type=Medium;
+        aiprofile=MISSIONS;
+        SurfaceMetal=3;
+        MohoMetal=30;
+        HumanMetal=5000;
+        ComputerMetal=7000;
+        HumanEnergy=6000;
+        ComputerEnergy=8000;
+        [specials]
+            {
+            [special0]
+                {
+                specialwhat=StartPos1;
+                XPos=1229;
+                ZPos=2432;
+                }
+            }
+        [units]
+            {
+            [unit0]
+                {
+                Unitname=EXMUNIT;
+                Ident=;
+                XPos=1099;
+                YPos=85;
+                ZPos=2402;
+                Player=1;
+                HealthPercentage=100;
+                Angle=0;
+                Kills=0;
+                }
+            [unit1]
+                {
+                Unitname=ENEMYUNIT;
+                Ident=;
+                XPos=372;
+                YPos=85;
+                ZPos=1813;
+                Player=2;
+                HealthPercentage=75;
+                Angle=270;
+                Kills=2;
+                CreationCountdown=0;
+                InitialMission=p 1750 1828;
+                InitialGroup=3;
+                Immunity=1;
+                AiIgnore=1;
+                }
+            [unit2]
+                {
+                Unitname=EXMGATE;
+                Ident=;
+                XPos=500;
+                YPos=85;
+                ZPos=900;
+                Player=2;
+                HealthPercentage=100;
+                Angle=0;
+                Kills=0;
+                }
+            }
+        }
+    }
+)TDF";
+
+        auto ota = parseOta(parseTdfFromString(input));
+
+        SECTION("parses mission objectives from the global header")
+        {
+            REQUIRE(ota.objectives.size() == 3);
+
+            REQUIRE(ota.objectives[0].type == "MoveUnitToRadius");
+            REQUIRE(ota.objectives[0].params == std::vector<std::string>{"ANYTYPE", "992", "656", "64"});
+
+            REQUIRE(ota.objectives[1].type == "AllUnitsKilled");
+            REQUIRE(ota.objectives[1].params == std::vector<std::string>{"1"});
+
+            REQUIRE(ota.objectives[2].type == "AllUnitsKilledOfType");
+            REQUIRE(ota.objectives[2].params == std::vector<std::string>{"EXMGATE"});
+        }
+
+        SECTION("parses schema [unitN] blocks in stable order")
+        {
+            REQUIRE(ota.schemas.size() == 1);
+            const auto& units = ota.schemas[0].units;
+            REQUIRE(units.size() == 3);
+
+            REQUIRE(units[0].index == 0);
+            REQUIRE(units[0].unitName == "EXMUNIT");
+            REQUIRE(units[0].player == 1);
+            REQUIRE(units[0].xPos == 1099);
+            REQUIRE(units[0].yPos == 85);
+            REQUIRE(units[0].zPos == 2402);
+            REQUIRE(units[0].healthPercentage == std::optional<unsigned int>(100));
+            REQUIRE(units[0].angle == std::optional<unsigned int>(0));
+            REQUIRE(units[0].initialMission.empty());
+            REQUIRE(!units[0].immunity);
+            REQUIRE(!units[0].aiIgnore);
+
+            REQUIRE(units[1].index == 1);
+            REQUIRE(units[1].unitName == "ENEMYUNIT");
+            REQUIRE(units[1].player == 2);
+            REQUIRE(units[1].xPos == 372);
+            REQUIRE(units[1].zPos == 1813);
+            REQUIRE(units[1].healthPercentage == std::optional<unsigned int>(75));
+            REQUIRE(units[1].angle == std::optional<unsigned int>(270));
+            REQUIRE(units[1].kills == std::optional<unsigned int>(2));
+            REQUIRE(units[1].creationCountdown == std::optional<unsigned int>(0));
+            REQUIRE(units[1].initialMission == "p 1750 1828");
+            REQUIRE(units[1].initialGroup == std::optional<unsigned int>(3));
+            REQUIRE(units[1].immunity);
+            REQUIRE(units[1].aiIgnore);
+
+            REQUIRE(units[2].index == 2);
+            REQUIRE(units[2].unitName == "EXMGATE");
+            REQUIRE(units[2].player == 2);
+        }
+    }
+
+    TEST_CASE("parseOta skirmish map has no mission data")
+    {
+        std::string input = R"TDF(
+[GlobalHeader]
+    {
+    missionname=Painted Desert;
+    SCHEMACOUNT=1;
+    [Schema 0]
+        {
+        Type=Network 2;
+        }
+    }
+)TDF";
+
+        auto ota = parseOta(parseTdfFromString(input));
+
+        REQUIRE(ota.objectives.empty());
+        REQUIRE(ota.schemas.size() == 1);
+        REQUIRE(ota.schemas[0].units.empty());
+    }
 }

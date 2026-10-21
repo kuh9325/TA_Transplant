@@ -57,6 +57,7 @@ namespace rwe
             {"rotation", dumpJson(u.rotation)},
             {"physics", dumpJson(u.physics)},
             {"hitPoints", dumpJson(u.hitPoints)},
+            {"kills", dumpJson(static_cast<unsigned int>(u.kills))},
             {"lifeState", dumpJson(u.lifeState)},
             {"navigationState", dumpJson(u.navigationState)},
             {"behaviourState", dumpJson(u.behaviourState)},
@@ -64,6 +65,11 @@ namespace rwe
             {"yardOpen", dumpJson(u.yardOpen)},
             {"inCollision", dumpJson(u.inCollision)},
             {"fireOrders", dumpJson(u.fireOrders)},
+            {"moveOrders", dumpJson(u.moveOrders)},
+            {"orders", dumpJson(u.orders)},
+            {"lastDamagedAt", dumpJson(u.lastDamagedAt)},
+            {"lastDamagedBy", dumpJson(u.lastDamagedBy)},
+            {"missionState", dumpJson(u.missionState)},
             {"buildTimeCompleted", dumpJson(u.buildTimeCompleted)},
             {"activated", dumpJson(u.activated)},
             {"isSufficientlyPowered", dumpJson(u.isSufficientlyPowered)},
@@ -72,7 +78,36 @@ namespace rwe
             {"previousEnergyConsumptionBuffer", dumpJson(u.previousEnergyConsumptionBuffer)},
             {"previousMetalConsumptionBuffer", dumpJson(u.previousMetalConsumptionBuffer)},
             {"energyConsumptionBuffer", dumpJson(u.energyConsumptionBuffer)},
-            {"metalConsumptionBuffer", dumpJson(u.metalConsumptionBuffer)}};
+            {"metalConsumptionBuffer", dumpJson(u.metalConsumptionBuffer)},
+            {"weapons", dumpJson(u.weapons)},
+            {"backgroundOrders", dumpJson(u.backgroundOrders)},
+            {"carriedBy", dumpJson(u.carriedBy)},
+            {"attachSlot", dumpJson(u.attachSlot)},
+            {"passengers", dumpJson(u.passengers)},
+            {"nextKamikazeScan", dumpJson(u.nextKamikazeScan)},
+            {"nextServiceScan", dumpJson(u.nextServiceScan)},
+            {"aircraftService", u.aircraftService ? nlohmann::json{
+                {"facility", u.aircraftService->facility.value}, {"piece", u.aircraftService->piece},
+                {"phase", static_cast<unsigned int>(u.aircraftService->phase)},
+                {"bearing", u.aircraftService->loiterBearing.value}, {"goal", dumpJson(u.aircraftService->goal)},
+                {"automatic", u.aircraftService->automatic}} : nlohmann::json(nullptr)},
+            {"bomberState", u.bomberState ? nlohmann::json{
+                {"target", dumpJson(u.bomberState->target)},
+                {"phase", static_cast<unsigned int>(u.bomberState->phase)},
+                {"goal", dumpJson(u.bomberState->goal)},
+                {"releaseTarget", dumpJson(u.bomberState->releaseTarget)},
+                {"nextScan", dumpJson(u.bomberState->nextScan)}} : nlohmann::json(nullptr)},
+            {"cloakRequested", dumpJson(u.cloakRequested)},
+            {"cloaked", dumpJson(u.cloaked)},
+            {"cloakBlockedUntil", dumpJson(u.cloakBlockedUntil)}};
+    }
+
+    nlohmann::json dumpJson(const UnitWeapon& w)
+    {
+        return nlohmann::json{
+            {"weaponType", dumpJson(w.weaponType)},
+            {"readyTime", dumpJson(w.readyTime)},
+            {"stockpileCount", dumpJson(w.stockpileCount)}};
     }
 
     nlohmann::json dumpJson(const UnitPhysicsInfoGround& p)
@@ -152,6 +187,36 @@ namespace rwe
             {"repairProgress", dumpJson(s.repairProgress)},
         };
     }
+    nlohmann::json dumpJson(const UnitBehaviorStateReclaiming& s)
+    {
+        return nlohmann::json{
+            {"target", dumpJson(s.target)},
+            {"targetPosition", dumpJson(s.targetPosition)},
+        };
+    }
+    nlohmann::json dumpJson(const UnitBehaviorStateCapturing& s)
+    {
+        return nlohmann::json{
+            {"target", dumpJson(s.target)},
+            {"targetPosition", dumpJson(s.targetPosition)},
+        };
+    }
+    nlohmann::json dumpJson(const MapFeature& f)
+    {
+        return nlohmann::json{
+            {"featureName", dumpJson(f.featureName)},
+            {"position", dumpJson(f.position)},
+            {"rotation", dumpJson(f.rotation)},
+            {"reclaimWorkDone", dumpJson(f.reclaimWorkDone)},
+            {"reclaimMetalGiven", dumpJson(f.reclaimMetalGiven)},
+            {"reclaimEnergyGiven", dumpJson(f.reclaimEnergyGiven)},
+            {"damageAccumulated", f.damageAccumulated},
+            {"event", static_cast<unsigned int>(f.event)},
+            {"animationFrame", f.animationFrame}, {"animationDelay", f.animationDelay},
+            {"shadowFrame", f.shadowFrame}, {"shadowDelay", f.shadowDelay},
+            {"sparkCountdown", f.sparkCountdown},
+        };
+    }
     nlohmann::json dumpJson(const UnitBehaviorStateCreatingUnit& s)
     {
         return nlohmann::json{
@@ -197,7 +262,8 @@ namespace rwe
         return nlohmann::json{
             {"movementGoal", dumpJson(m.movementGoal)},
             {"pathDestination", dumpJson(m.pathDestination)},
-            {"pathRequested", m.pathRequested}};
+            {"pathRequested", m.pathRequested},
+            {"pathExhausted", m.pathExhausted}};
     }
 
     nlohmann::json dumpJson(const NavigationStateMovingToLandingSpot& m)
@@ -221,13 +287,176 @@ namespace rwe
             {"width", r.width},
             {"height", r.height}};
     }
+
+    nlohmann::json dumpJson(const MoveOrder& o)
+    {
+        return nlohmann::json{
+            {"destination", dumpJson(o.destination)}};
+    }
+
+    nlohmann::json dumpJson(const AttackOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const BuildOrder& o)
+    {
+        return nlohmann::json{
+            {"unitType", dumpJson(o.unitType)},
+            {"position", dumpJson(o.position)}};
+    }
+
+    nlohmann::json dumpJson(const BuggerOffOrder& o)
+    {
+        return nlohmann::json{{"rect", dumpJson(o.rect)}};
+    }
+
+    nlohmann::json dumpJson(const CompleteBuildOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const GuardOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const RepairOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const ReclaimOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const PatrolOrder& o)
+    {
+        return nlohmann::json{
+            {"waypoints", dumpJson(o.waypoints)},
+            {"nextWaypointIndex", dumpJson(o.nextWaypointIndex)}};
+    }
+
+    nlohmann::json dumpJson(const CaptureOrder& o)
+    {
+        return nlohmann::json{
+            {"target", dumpJson(o.target)},
+            {"progress", dumpJson(o.progress)},
+            {"workRequired", dumpJson(o.workRequired)},
+            {"workTicks", dumpJson(o.workTicks)}};
+    }
+
+    nlohmann::json dumpJson(const WaitOrder& o)
+    {
+        return nlohmann::json{{"ticksRemaining", dumpJson(o.ticksRemaining)}};
+    }
+
+    nlohmann::json dumpJson(const WaitForAttackOrder& o)
+    {
+        return nlohmann::json{
+            {"target", dumpJson(o.target)},
+            {"armed", dumpJson(o.armed)},
+            {"observedDamagedAt", dumpJson(o.observedDamagedAt)}};
+    }
+
+    nlohmann::json dumpJson(const MakeSelectableOrder&)
+    {
+        return nlohmann::json{};
+    }
+
+    nlohmann::json dumpJson(const AttackUnitTypeOrder& o)
+    {
+        return nlohmann::json{
+            {"unitType", dumpJson(o.unitType)},
+            {"nextScanTime", dumpJson(o.nextScanTime)},
+            {"currentTarget", dumpJson(o.currentTarget)}};
+    }
+
+    nlohmann::json dumpJson(const MissionBuildOrder& o)
+    {
+        return nlohmann::json{
+            {"unitType", dumpJson(o.unitType)},
+            {"position", dumpJson(o.position)},
+            {"attemptsRemaining", dumpJson(o.attemptsRemaining)},
+            {"retryAt", dumpJson(o.retryAt)}};
+    }
+
+    nlohmann::json dumpJson(const MissionFactoryBuildOrder& o)
+    {
+        return nlohmann::json{
+            {"unitType", dumpJson(o.unitType)},
+            {"count", dumpJson(o.count)},
+            {"enqueued", dumpJson(o.enqueued)}};
+    }
+
+    nlohmann::json dumpJson(const SelfDestructOrder& o)
+    {
+        return nlohmann::json{
+            {"countdownTicks", dumpJson(o.countdownTicks)},
+            {"fuseTicks", dumpJson(o.fuseTicks)}};
+    }
+
+    nlohmann::json dumpJson(const UnloadOrder& o)
+    {
+        return nlohmann::json{
+            {"destination", dumpJson(o.destination)},
+            {"pops", dumpJson(o.pops)},
+            {"claimActive", dumpJson(o.claimActive)},
+            {"cycleTicks", dumpJson(o.cycleTicks)},
+            {"dropRadius", dumpJson(o.dropRadius)}};
+    }
+
+    nlohmann::json dumpJson(const LandOrder& o) { return {{"type", "Land"}, {"target", o.target.value}}; }
+
+    nlohmann::json dumpJson(const ParalyzeOrder& o)
+    {
+        return nlohmann::json{{"credit", o.credit}, {"resumeAt", dumpJson(o.resumeAt)}};
+    }
+
+    nlohmann::json dumpJson(const LoadOrder& o)
+    {
+        return nlohmann::json{
+            {"target", dumpJson(o.target)},
+            {"attempts", dumpJson(o.attempts)},
+            {"waitTicks", dumpJson(o.waitTicks)},
+            {"pickupThreadStarted", dumpJson(o.pickupThreadStarted)},
+            {"phase", dumpJson(o.phase)},
+            {"slot", dumpJson(o.slot)}};
+    }
+
+    nlohmann::json dumpJson(const BuildWeaponOrder& o)
+    {
+        return nlohmann::json{
+            {"remaining", dumpJson(o.remaining)},
+            {"progressTicks", dumpJson(o.progressTicks)}};
+    }
+
+    nlohmann::json dumpJson(const CommandFireOrder& o)
+    {
+        return nlohmann::json{
+            {"target", dumpJson(o.target)},
+            {"observedReadyTime", dumpJson(o.observedReadyTime)}};
+    }
+
+    nlohmann::json dumpJson(const MissionUnitState& s)
+    {
+        return nlohmann::json{
+            {"initialMission", dumpJson(s.initialMission)},
+            {"ident", dumpJson(s.ident)},
+            {"selectable", dumpJson(s.selectable)}};
+    }
+
     nlohmann::json dumpJson(const GameSimulation& simulation)
     {
         return nlohmann::json{
             {"gameTime", dumpJson(simulation.gameTime)},
+            {"mapGravity", simulation.mapGravity},
+            {"projectileWind", dumpJson(simulation.projectileWind)},
             {"players", dumpJson(simulation.players)},
             {"units", dumpJson(simulation.units)},
             {"projectiles", dumpJson(simulation.projectiles)},
+            {"features", dumpJson(simulation.features)},
         };
     }
 }

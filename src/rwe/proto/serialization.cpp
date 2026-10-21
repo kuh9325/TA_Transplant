@@ -1,15 +1,22 @@
 #include "serialization.h"
 
+#include <rwe/util/match.h>
 
 namespace rwe
 {
+    /**
+     * Writes an AttackTarget into a proto order message exposing
+     * `mutable_ground()`/`set_unit()` -- shared by AttackOrder and
+     * CommandFireOrder, which carry the same target shape.
+     */
+    template <typename T>
     class WriteAttackTargetVisitor
     {
     private:
-        proto::AttackOrder* cmd;
+        T* cmd;
 
     public:
-        explicit WriteAttackTargetVisitor(proto::AttackOrder& cmd) : cmd(&cmd) {}
+        explicit WriteAttackTargetVisitor(T& cmd) : cmd(&cmd) {}
 
         void operator()(const SimVector& v)
         {
@@ -41,7 +48,7 @@ namespace rwe
         void operator()(const AttackOrder& o)
         {
             auto& out = *cmd->mutable_attack();
-            WriteAttackTargetVisitor visitor(out);
+            WriteAttackTargetVisitor<proto::AttackOrder> visitor(out);
             std::visit(visitor, o.target);
         }
 
@@ -73,6 +80,103 @@ namespace rwe
         void operator()(const RepairOrder& o)
         {
             auto& out = *cmd->mutable_repair();
+            out.set_unit(o.target.value);
+        }
+
+        void operator()(const ReclaimOrder& o)
+        {
+            auto& out = *cmd->mutable_reclaim();
+            match(
+                o.target,
+                [&](const UnitId& unitId) { out.set_unit(unitId.value); },
+                [&](const FeatureId& featureId) { out.set_feature(featureId.value); });
+        }
+
+        void operator()(const PatrolOrder& o)
+        {
+            // a player patrol command carries only the clicked destination;
+            // the route anchor is added when the order is applied
+            auto& out = *cmd->mutable_patrol();
+            auto& dest = *out.mutable_destination();
+            serializeVector(o.waypoints.empty() ? SimVector(0_ss, 0_ss, 0_ss) : o.waypoints.front(), dest);
+        }
+
+        void operator()(const WaitOrder&)
+        {
+            throw std::logic_error("Cannot serialize WaitOrder");
+        }
+
+        void operator()(const WaitForAttackOrder&)
+        {
+            throw std::logic_error("Cannot serialize WaitForAttackOrder");
+        }
+
+        void operator()(const ParalyzeOrder&)
+        {
+            // Derived independently from the same impacts on every peer.
+            throw std::logic_error("Cannot serialize internal ParalyzeOrder");
+        }
+
+        void operator()(const MakeSelectableOrder&)
+        {
+            throw std::logic_error("Cannot serialize MakeSelectableOrder");
+        }
+
+        void operator()(const AttackUnitTypeOrder&)
+        {
+            throw std::logic_error("Cannot serialize AttackUnitTypeOrder");
+        }
+
+        void operator()(const MissionBuildOrder&)
+        {
+            throw std::logic_error("Cannot serialize MissionBuildOrder");
+        }
+
+        void operator()(const MissionFactoryBuildOrder&)
+        {
+            throw std::logic_error("Cannot serialize MissionFactoryBuildOrder");
+        }
+
+        void operator()(const SelfDestructOrder&)
+        {
+            throw std::logic_error("Cannot serialize SelfDestructOrder");
+        }
+
+        void operator()(const UnloadOrder& o)
+        {
+            // only the destination crosses the wire; the runtime
+            // claim/drop state is derived deterministically from it
+            auto& out = *cmd->mutable_unload();
+            auto& pos = *out.mutable_destination();
+            serializeVector(o.destination, pos);
+        }
+
+        void operator()(const LandOrder& o)
+        {
+            cmd->mutable_land()->set_unit(o.target.value);
+        }
+
+        void operator()(const LoadOrder& o)
+        {
+            auto& out = *cmd->mutable_load();
+            out.set_unit(o.target.value);
+        }
+
+        void operator()(const BuildWeaponOrder&)
+        {
+            throw std::logic_error("Cannot serialize BuildWeaponOrder");
+        }
+
+        void operator()(const CommandFireOrder& o)
+        {
+            auto& out = *cmd->mutable_command_fire();
+            WriteAttackTargetVisitor<proto::CommandFireOrder> visitor(out);
+            std::visit(visitor, o.target);
+        }
+
+        void operator()(const CaptureOrder& o)
+        {
+            auto& out = *cmd->mutable_capture();
             out.set_unit(o.target.value);
         }
     };
@@ -116,6 +220,29 @@ namespace rwe
         {
             auto& out = *cmd->mutable_set_on_off();
             out.set_ison(c.on);
+        }
+
+        void operator()(const PlayerUnitCommand::SetCloak& c)
+        {
+            auto& out = *cmd->mutable_set_cloak();
+            out.set_cloak(c.on);
+        }
+
+        void operator()(const PlayerUnitCommand::RemoveOrder& c)
+        {
+            auto& out = *cmd->mutable_remove_order();
+            out.set_index(c.index);
+        }
+
+        void operator()(const PlayerUnitCommand::ToggleSelfDestruct& c)
+        {
+            cmd->mutable_toggle_self_destruct();
+        }
+
+        void operator()(const PlayerUnitCommand::ModifyWeaponQueue& c)
+        {
+            auto& out = *cmd->mutable_modify_weapon_queue();
+            out.set_count(c.count);
         }
     };
 
@@ -249,6 +376,26 @@ namespace rwe
             return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::SetOnOff{cmd.set_on_off().ison()});
         }
 
+        if (cmd.has_set_cloak())
+        {
+            return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::SetCloak{cmd.set_cloak().cloak()});
+        }
+
+        if (cmd.has_remove_order())
+        {
+            return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::RemoveOrder{cmd.remove_order().index()});
+        }
+
+        if (cmd.has_toggle_self_destruct())
+        {
+            return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::ToggleSelfDestruct{});
+        }
+
+        if (cmd.has_modify_weapon_queue())
+        {
+            return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::ModifyWeaponQueue{cmd.modify_weapon_queue().count()});
+        }
+
         throw std::runtime_error("Failed to deserialize unit command");
     }
 
@@ -332,6 +479,57 @@ namespace rwe
         {
             const auto& repair = cmd.repair();
             return RepairOrder(UnitId(repair.unit()));
+        }
+
+        if (cmd.has_reclaim())
+        {
+            const auto& reclaim = cmd.reclaim();
+            if (reclaim.has_unit())
+            {
+                return ReclaimOrder(UnitId(reclaim.unit()));
+            }
+            return ReclaimOrder(FeatureId(reclaim.feature()));
+        }
+
+        if (cmd.has_patrol())
+        {
+            const auto& patrol = cmd.patrol();
+            return PatrolOrder({deserializeVector(patrol.destination())});
+        }
+
+        if (cmd.has_capture())
+        {
+            return CaptureOrder(UnitId(cmd.capture().unit()));
+        }
+
+        if (cmd.has_land())
+        {
+            return LandOrder(UnitId(cmd.land().unit()));
+        }
+
+        if (cmd.has_load())
+        {
+            return LoadOrder(UnitId(cmd.load().unit()));
+        }
+
+        if (cmd.has_unload())
+        {
+            return UnloadOrder(deserializeVector(cmd.unload().destination()));
+        }
+        if (cmd.has_command_fire())
+        {
+            const auto& commandFire = cmd.command_fire();
+            if (commandFire.has_unit())
+            {
+                return CommandFireOrder(UnitId(commandFire.unit()));
+            }
+
+            if (commandFire.has_ground())
+            {
+                return CommandFireOrder(deserializeVector(commandFire.ground()));
+            }
+
+            throw std::runtime_error("Failed to deserialize command-fire order");
         }
 
         throw std::runtime_error("Failed to deserlialize unit order");

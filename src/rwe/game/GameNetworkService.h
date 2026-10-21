@@ -2,8 +2,13 @@
 
 #include <asio.hpp>
 #include <chrono>
+#include <atomic>
+#include <array>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
 #include <deque>
-#include <future>
 #include <network.pb.h>
 #include <random>
 #include <rwe/game/PlayerCommand.h>
@@ -23,6 +28,7 @@ namespace rwe
     class GameNetworkService
     {
     public:
+        enum class Status { NotStarted, Starting, Running, Stopped, Failed };
         using CommandSet = std::vector<PlayerCommand>;
         struct EndpointInfo
         {
@@ -80,6 +86,17 @@ namespace rwe
         int port;
 
         std::thread networkThread;
+        // Lifecycle calls are serialized; the I/O thread never takes this lock.
+        std::mutex lifecycleMutex;
+        std::atomic<Status> status{Status::NotStarted};
+        std::atomic<unsigned short> localPort{0};
+        struct TimingSnapshot
+        {
+            std::vector<std::pair<SceneTime, Timestamp>> peerSceneTimes;
+            float maxRttMillis{0};
+        };
+        std::shared_ptr<const TimingSnapshot> timingSnapshot{std::make_shared<TimingSnapshot>()};
+        std::shared_ptr<const std::string> failureReason{std::make_shared<std::string>()};
 
         asio::io_context ioContext;
         asio::ip::udp::resolver resolver;
@@ -88,8 +105,11 @@ namespace rwe
 
         std::vector<EndpointInfo> endpoints;
 
-        std::array<char, 1500> sendBuffer;
-        std::array<char, 1500> receiveBuffer;
+        // Complete command sets remain atomic. Large selections may need IP
+        // fragmentation, but never exceed the portable UDP payload limit.
+        static constexpr std::size_t MaxDatagramSize = 65507;
+        std::array<char, MaxDatagramSize> sendBuffer;
+        std::array<char, MaxDatagramSize> receiveBuffer;
         asio::ip::udp::endpoint currentRemoteEndpoint;
 
         PlayerCommandService* const playerCommandService;
@@ -101,7 +121,12 @@ namespace rwe
 
         virtual ~GameNetworkService();
 
+        // One-shot lifecycle: repeated start/stop calls are safe; stop is final.
         void start();
+        void stop();
+        Status getStatus() const { return status.load(); }
+        unsigned short getLocalPort() const { return localPort.load(); }
+        std::string getFailureReason() const { return *std::atomic_load(&failureReason); }
 
         /**
          * Submit new information to be sent on the network.
@@ -122,6 +147,8 @@ namespace rwe
 
     private:
         void run();
+        void publishTimingSnapshot();
+        bool acceptsSubmissions() const;
 
         void listenForNextMessage();
 

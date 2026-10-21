@@ -55,6 +55,49 @@ message RepairOrder
     required int32 unit = 1;
 }
 
+message ReclaimOrder
+{
+    oneof target
+    {
+        int32 unit = 1;
+        uint32 feature = 2;
+    }
+}
+
+message PatrolOrder
+{
+    required SimVector destination = 1;
+}
+
+message CommandFireOrder
+{
+    oneof target
+    {
+        int32 unit = 1;
+        SimVector ground = 2;
+    }
+}
+
+message LandOrder
+{
+    required int32 unit = 1;
+}
+
+message CaptureOrder
+{
+    required int32 unit = 1;
+}
+
+message LoadOrder
+{
+    required int32 unit = 1;
+}
+
+message UnloadOrder
+{
+    required SimVector destination = 1;
+}
+
 message PlayerUnitCommand
 {
     message IssueOrder
@@ -74,6 +117,13 @@ message PlayerUnitCommand
             CompleteBuildOrder complete_build = 5;
             GuardOrder guard = 6;
             RepairOrder repair = 7;
+            ReclaimOrder reclaim = 8;
+            PatrolOrder patrol = 9;
+            CommandFireOrder command_fire = 10;
+            CaptureOrder capture = 11;
+            LoadOrder load = 12;
+            UnloadOrder unload = 13;
+            LandOrder land = 14;
         }
     }
 
@@ -81,6 +131,11 @@ message PlayerUnitCommand
     {
         required int32 count = 1;
         required string unit_type = 2;
+    }
+
+    message ModifyWeaponQueue
+    {
+        required int32 count = 1;
     }
 
     message Stop
@@ -104,6 +159,20 @@ message PlayerUnitCommand
         required bool isOn = 1;
     }
 
+    message SetCloak
+    {
+        required bool cloak = 1;
+    }
+
+    message RemoveOrder
+    {
+        required int32 index = 1;
+    }
+
+    message ToggleSelfDestruct
+    {
+    }
+
     required int32 unit = 1;
 
     oneof command {
@@ -112,6 +181,10 @@ message PlayerUnitCommand
         SetFireOrders set_fire_orders = 4;
         SetOnOff set_on_off = 5;
         ModifyBuildQueue modify_build_queue = 6;
+        RemoveOrder remove_order = 7;
+        SetCloak set_cloak = 8;
+        ToggleSelfDestruct toggle_self_destruct = 9;
+        ModifyWeaponQueue modify_weapon_queue = 10;
     }
 }
 

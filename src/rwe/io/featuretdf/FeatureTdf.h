@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <rwe/sim/FeatureDefinition.h>
 #include <rwe/io/tdf/TdfBlock.h>
 #include <string>
 
@@ -38,7 +39,7 @@ namespace rwe
         std::string featureBurnt;
         unsigned int burnMin;
         unsigned int burnMax;
-        unsigned int sparkTime;
+        float sparkTime;
         unsigned int spreadChance;
         std::string burnWeapon;
 
@@ -59,5 +60,8 @@ namespace rwe
         unsigned int damage;
         std::string seqNameDie;
         std::string featureDead;
+        std::string seqNameDieShad;
+        std::string seqNameReclamateShad;
+        std::array<FeatureAnimation, 3> animations;
     };
 }

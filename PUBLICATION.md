@@ -1,0 +1,23 @@
+# Publication source provenance and constraints
+
+Modified work prepared 2026-10-20. This is an uncommitted review candidate, not an approved release.
+
+TA Transplant is a downstream modification of Robot War Engine (RWE), originally developed by Michael Heasell and other RWE contributors. Retain their existing copyright, license, warranty and attribution notices. The upstream public history remains part of the proposed publication ancestry. This preparation does not claim sole authorship or recreate old commits under a new author.
+
+The native source snapshot derives from approved local baseline `d79fa8e2480586631b003de9758d814d3e9137e6`. The proposal uses current public master `d908774d7bd043779f04c63b4408011df889c25f` as its sole parent. Local private commits are provenance references only; they are not to be merged or cherry-picked into the publication branch. The future integration commit must describe a source-snapshot import, retain downstream attribution, and use an owner-approved publication identity.
+
+The downstream source license remains GPL-3.0 under the existing [LICENSE](LICENSE); no new ownership grant or relicensing of third-party material is asserted. Modified-work notice and date are provided here. See [DOWNSTREAM_PROVENANCE.json](DOWNSTREAM_PROVENANCE.json) for per-path baseline change dates and contributor names recorded by Git. Git attribution is evidence of recorded contributions, not a rights warranty. Owner confirmation of contribution rights remains required before publication.
+
+This candidate changes the provenance output defaults in `scripts/summarize_mission_completion_audit.py`, the README, the macOS icon resource policy and plist, and adds these source-provenance/build-version records. All `src/`, `shaders/` and `proto/` files remain byte-identical to the baseline. Existing source-level copyright notices remain intact. Most project files rely on repository-level licensing; no invented copyright owner is added.
+
+The historical `docs/macos27/` collection, including local audit diagnostics, icon reconstruction sources/scripts, Icon Composer layers, SVG review sheets with embedded images, PNG/iconset variants and ICNS resources, is deliberately excluded. It is preserved in the private development baseline. This is a source-only publication boundary, not a withdrawal or revision of historical QA results. Retail game archives, mission-derived evidence, saves, user profiles, raw reports, build outputs, recovery archives and Git databases are not part of the payload.
+
+The approved local Modern Industrial artwork has an unresolved redistribution basis, including its recognizable historic insignia. This source candidate contains no replacement artwork. `RWE_MACOS_ICON_FORMAT=NONE` is the only supported publication resource policy; CMake supplies no icon and the plist contains no icon keys. The operating system's generic display is not a redistributed project asset. The private approved app remains separate and unchanged.
+
+Historical baseline automation: 583 tests / 695,342 assertions passed. Human QA, complete mission coverage, cross-architecture determinism, live multiplayer, save compatibility and clean external-Mac checks remain qualified or pending. Independent publication-candidate test results are recorded in the local review report. Source buildability does not establish legal or binary-release clearance.
+
+Use `.gitmodules` and the recorded gitlink revisions to initialize dependencies. A superproject-only archive does not contain submodule contents; it is not a self-contained offline distribution. Dependency notices and source remain at their original paths in those pinned trees. See [THIRD_PARTY_REVIEW.md](THIRD_PARTY_REVIEW.md). Do not upload a local dependency checkout, package cache or build folder wholesale.
+
+The source license does not grant rights in Total Annihilation data, logos, trademarks or other proprietary material. The project is independent and not affiliated with or endorsed by the original developers, publishers or rights holders. Use legitimately installed external game data; generated runtime diagnostics still require a separate privacy review before sharing.
+
+Phase 10F notice update, 2026-10-20: restored the referenced BSD conditions/disclaimer in `cmake/Modules/FindSDL2.cmake` and `cmake/Modules/FindSDL2_image.cmake` without changing existing copyright lines or executable commands. Added `LICENSE_INVENTORY.md` and `SOURCE_DEPENDENCIES.json`; linked them from `THIRD_PARTY_REVIEW.md`. No engine, test, shader, protocol, build behavior or private-path handling changed from the verified Phase 10E Option B candidate.

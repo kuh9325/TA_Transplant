@@ -2,6 +2,7 @@
 
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/game/SceneTime.h>
 #include <rwe/sim/GameHash.h>
@@ -28,7 +29,11 @@ namespace rwe
 
         unsigned int bufferedCommandCount(PlayerId player) const;
 
-        void registerPlayer(PlayerId playerId);
+        unsigned int bufferedHashCount(PlayerId player) const;
+
+        // Computers participate in command lockstep, but their deterministic
+        // simulation is already included in each human peer's game hash.
+        void registerPlayer(PlayerId playerId, bool participatesInHashCheck = true);
 
         bool checkHashes();
     };

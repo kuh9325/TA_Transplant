@@ -295,6 +295,8 @@ namespace rwe
         unbindBuffer(GL_ARRAY_BUFFER);
         unbindVertexArray();
 
+        ++renderStats.bufferUploads;
+        renderStats.bufferBytesUploaded += vertices.size() * sizeof(GlTexturedVertex);
         return GlMesh(std::move(vao), std::move(vbo), vertices.size());
     }
 
@@ -316,6 +318,8 @@ namespace rwe
         unbindBuffer(GL_ARRAY_BUFFER);
         unbindVertexArray();
 
+        ++renderStats.bufferUploads;
+        renderStats.bufferBytesUploaded += vertices.size() * sizeof(GlTextureArrayVertex);
         return GlMesh(std::move(vao), std::move(vbo), vertices.size());
     }
 
@@ -337,6 +341,8 @@ namespace rwe
         unbindBuffer(GL_ARRAY_BUFFER);
         unbindVertexArray();
 
+        ++renderStats.bufferUploads;
+        renderStats.bufferBytesUploaded += vertices.size() * sizeof(GlColoredVertex);
         return GlMesh(std::move(vao), std::move(vbo), vertices.size());
     }
 
@@ -360,6 +366,8 @@ namespace rwe
         unbindBuffer(GL_ARRAY_BUFFER);
         unbindVertexArray();
 
+        ++renderStats.bufferUploads;
+        renderStats.bufferBytesUploaded += vertices.size() * sizeof(GlTexturedNormalVertex);
         return GlMesh(std::move(vao), std::move(vbo), vertices.size());
     }
 
@@ -383,6 +391,8 @@ namespace rwe
         unbindBuffer(GL_ARRAY_BUFFER);
         unbindVertexArray();
 
+        ++renderStats.bufferUploads;
+        renderStats.bufferBytesUploaded += vertices.size() * sizeof(GlColoredNormalVertex);
         return GlMesh(std::move(vao), std::move(vbo), vertices.size());
     }
 
@@ -424,13 +434,18 @@ namespace rwe
     {
         glUseProgram(shader.value);
         glBindVertexArray(mesh.vao.get().value);
+        renderStats.programBinds += 2;
 
         {
             auto location = glGetUniformLocation(shader.value, "mvpMatrix");
             glUniformMatrix4fv(location, 1, GL_FALSE, mvpMatrix.data);
+            ++renderStats.uniformLookups;
+            ++renderStats.uniformUpdates;
         }
 
         glDrawArrays(mode, 0, mesh.vertexCount);
+        ++renderStats.drawCalls;
+        renderStats.verticesDrawn += mesh.vertexCount;
 
         glBindVertexArray(0);
         glUseProgram(0);
@@ -445,6 +460,7 @@ namespace rwe
     {
         glUseProgram(shader.value);
         glBindVertexArray(mesh.vao.get().value);
+        renderStats.programBinds += 2;
 
         {
             auto textureModelMatrix = glGetUniformLocation(shader.value, "modelMatrix");
@@ -459,8 +475,12 @@ namespace rwe
             auto seaLevelUniform = glGetUniformLocation(shader.value, "seaLevel");
             glUniform1f(seaLevelUniform, seaLevel);
         }
+        renderStats.uniformLookups += 3;
+        renderStats.uniformUpdates += 3;
 
         glDrawArrays(GL_TRIANGLES, 0, mesh.vertexCount);
+        ++renderStats.drawCalls;
+        renderStats.verticesDrawn += mesh.vertexCount;
 
         glBindVertexArray(0);
         glUseProgram(0);
@@ -469,31 +489,37 @@ namespace rwe
     void GraphicsContext::bindShader(ShaderProgramIdentifier shader)
     {
         glUseProgram(shader.value);
+        ++renderStats.programBinds;
     }
 
     void GraphicsContext::unbindShader()
     {
         glUseProgram(0);
+        ++renderStats.programBinds;
     }
 
     void GraphicsContext::bindTexture(TextureIdentifier texture)
     {
         glBindTexture(GL_TEXTURE_2D, texture.value);
+        ++renderStats.textureBinds;
     }
 
     void GraphicsContext::bindTextureArray(TextureArrayIdentifier texture)
     {
         glBindTexture(GL_TEXTURE_2D_ARRAY, texture.value);
+        ++renderStats.textureBinds;
     }
 
     void GraphicsContext::unbindTexture()
     {
         glBindTexture(GL_TEXTURE_2D, 0);
+        ++renderStats.textureBinds;
     }
 
     void GraphicsContext::unbindTextureArray()
     {
         glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+        ++renderStats.textureBinds;
     }
 
     void GraphicsContext::bindFrameBuffer(FrameBufferIdentifier frameBuffer)
@@ -520,37 +546,44 @@ namespace rwe
     UniformLocation GraphicsContext::getUniformLocation(ShaderProgramIdentifier shader, const std::string& name)
     {
         auto loc = glGetUniformLocation(shader.value, name.data());
+        ++renderStats.uniformLookups;
         return UniformLocation(loc);
     }
 
     void GraphicsContext::setUniformInt(UniformLocation location, int value)
     {
         glUniform1i(location.value, value);
+        ++renderStats.uniformUpdates;
     }
 
     void GraphicsContext::setUniformFloat(UniformLocation location, float value)
     {
         glUniform1f(location.value, value);
+        ++renderStats.uniformUpdates;
     }
 
     void GraphicsContext::setUniformVec3(UniformLocation location, float a, float b, float c)
     {
         glUniform3f(location.value, a, b, c);
+        ++renderStats.uniformUpdates;
     }
 
     void GraphicsContext::setUniformVec4(UniformLocation location, float a, float b, float c, float d)
     {
         glUniform4f(location.value, a, b, c, d);
+        ++renderStats.uniformUpdates;
     }
 
     void GraphicsContext::setUniformMatrix(UniformLocation location, const Matrix4f& matrix)
     {
         glUniformMatrix4fv(location.value, 1, GL_FALSE, matrix.data);
+        ++renderStats.uniformUpdates;
     }
 
     void GraphicsContext::setUniformBool(UniformLocation location, bool value)
     {
         glUniform1i(location.value, value);
+        ++renderStats.uniformUpdates;
     }
 
     void GraphicsContext::drawTriangles(const GlMesh& mesh)
@@ -558,6 +591,76 @@ namespace rwe
         glBindVertexArray(mesh.vao.get().value);
         glDrawArrays(GL_TRIANGLES, 0, mesh.vertexCount);
         glBindVertexArray(0);
+        ++renderStats.drawCalls;
+        renderStats.verticesDrawn += mesh.vertexCount;
+    }
+
+    void GraphicsContext::drawTrianglesInstanced(const GlMesh& mesh, const void* instanceData, std::size_t instanceCount)
+    {
+        if (instanceCount == 0)
+        {
+            return;
+        }
+
+        // 144-byte instance records: mat4 iModel (locs 3-6, off 0),
+        // mat4 iMvp (locs 8-11, off 64), vec4 iParams (loc 7, off 128)
+        constexpr std::size_t stride = 144;
+        const std::size_t bytes = stride * instanceCount;
+
+        if (!instancedStreamVbo.get().isValid())
+        {
+            instancedStreamVbo = genBuffer();
+        }
+
+        glBindVertexArray(mesh.vao.get().value);
+        glBindBuffer(GL_ARRAY_BUFFER, instancedStreamVbo.get().value);
+
+        if (bytes > instancedStreamVboCapacity)
+        {
+            glBufferData(GL_ARRAY_BUFFER, bytes, instanceData, GL_STREAM_DRAW);
+            instancedStreamVboCapacity = bytes;
+        }
+        else
+        {
+            // orphan the previous contents so the upload cannot stall on
+            // a frame the driver is still reading
+            glBufferData(GL_ARRAY_BUFFER, instancedStreamVboCapacity, nullptr, GL_STREAM_DRAW);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, instanceData);
+        }
+        ++renderStats.bufferUploads;
+        renderStats.bufferBytesUploaded += bytes;
+
+        for (GLuint col = 0; col < 4; ++col)
+        {
+            GLuint loc = 3 + col;
+            glEnableVertexAttribArray(loc);
+            glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(col * 16));
+            glVertexAttribDivisor(loc, 1);
+        }
+        glEnableVertexAttribArray(7);
+        glVertexAttribPointer(7, 4, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(128));
+        glVertexAttribDivisor(7, 1);
+        for (GLuint col = 0; col < 4; ++col)
+        {
+            GLuint loc = 8 + col;
+            glEnableVertexAttribArray(loc);
+            glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(64 + col * 16));
+            glVertexAttribDivisor(loc, 1);
+        }
+
+        glDrawArraysInstanced(GL_TRIANGLES, 0, mesh.vertexCount, static_cast<GLsizei>(instanceCount));
+
+        // restore: leave the mesh VAO exactly as createMesh built it
+        for (GLuint loc = 3; loc <= 11; ++loc)
+        {
+            glVertexAttribDivisor(loc, 0);
+            glDisableVertexAttribArray(loc);
+        }
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+
+        ++renderStats.drawCalls;
+        renderStats.verticesDrawn += mesh.vertexCount * instanceCount;
     }
 
     void GraphicsContext::drawLines(const GlMesh& mesh)
@@ -565,6 +668,8 @@ namespace rwe
         glBindVertexArray(mesh.vao.get().value);
         glDrawArrays(GL_LINES, 0, mesh.vertexCount);
         glBindVertexArray(0);
+        ++renderStats.drawCalls;
+        renderStats.verticesDrawn += mesh.vertexCount;
     }
 
     void GraphicsContext::drawLineLoop(const GlMesh& mesh)
@@ -572,6 +677,8 @@ namespace rwe
         glBindVertexArray(mesh.vao.get().value);
         glDrawArrays(GL_LINE_LOOP, 0, mesh.vertexCount);
         glBindVertexArray(0);
+        ++renderStats.drawCalls;
+        renderStats.verticesDrawn += mesh.vertexCount;
     }
 
     Sprite GraphicsContext::createSprite(
@@ -656,6 +763,31 @@ namespace rwe
     void GraphicsContext::setViewport(int x, int y, int width, int height)
     {
         glViewport(x, y, width, height);
+    }
+
+    void GraphicsContext::setScissor(int x, int y, int width, int height)
+    {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(x, y, width, height);
+    }
+
+    void GraphicsContext::readPixelsRGBA(int x, int y, int width, int height, std::vector<unsigned char>& out)
+    {
+        out.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
+    }
+
+    void GraphicsContext::clearScissor()
+    {
+        glDisable(GL_SCISSOR_TEST);
+    }
+
+    Viewport GraphicsContext::getDeviceViewport() const
+    {
+        GLint v[4];
+        glGetIntegerv(GL_VIEWPORT, v);
+        return Viewport(v[0], v[1], static_cast<unsigned int>(v[2]), static_cast<unsigned int>(v[3]));
     }
 
     FrameBufferInfo GraphicsContext::createFrameBuffer(int width, int height)

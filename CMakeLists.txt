@@ -17,14 +17,23 @@ else()
     message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 endif()
 
-find_package(Git REQUIRED)
-
-execute_process(
-    COMMAND "${GIT_EXECUTABLE}" "describe" "--dirty=-d"
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    OUTPUT_VARIABLE RWE_GIT_DESCRIPTION
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+# An exported source snapshot can build without a .git directory. The
+# exporter records the exact local version in SOURCE_VERSION; callers may
+# also supply -DRWE_GIT_DESCRIPTION=<version> explicitly.
+if(NOT RWE_GIT_DESCRIPTION)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SOURCE_VERSION")
+        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/SOURCE_VERSION" RWE_GIT_DESCRIPTION)
+        string(STRIP "${RWE_GIT_DESCRIPTION}" RWE_GIT_DESCRIPTION)
+    else()
+        find_package(Git REQUIRED)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" "describe" "--dirty=-d"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE RWE_GIT_DESCRIPTION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+    endif()
+endif()
 
 if(NOT RWE_GIT_DESCRIPTION)
     message(FATAL_ERROR "Failed to get the Git description")
@@ -36,6 +45,22 @@ endif()
 
 project("Robot War Engine" VERSION ${CMAKE_MATCH_1})
 enable_testing()
+
+option(RWE_STANDALONE_MACOS "Prepare the macOS standalone packaging profile" OFF)
+if(RWE_STANDALONE_MACOS)
+    if(NOT APPLE)
+        message(FATAL_ERROR "RWE_STANDALONE_MACOS requires macOS")
+    endif()
+    if(NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64" OR NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+        message(FATAL_ERROR "Set CMAKE_OSX_ARCHITECTURES=arm64 and an explicit CMAKE_OSX_DEPLOYMENT_TARGET")
+    endif()
+    # Keep built-in WAV/AIFF/AU/VOC, dr_flac, dr_mp3, stb_vorbis and
+    # TiMidity. Optional external decoder backends otherwise use dlopen
+    # names that are invisible to otool's linked-dependency graph.
+    foreach(codec FLAC_LIBFLAC MP3_MPG123 MIDI_FLUIDSYNTH GME MOD OPUS WAVPACK VORBIS_VORBISFILE VORBIS_TREMOR)
+        set(SDLMIXER_${codec} OFF CACHE BOOL "Standalone built-in decoder profile" FORCE)
+    endforeach()
+endif()
 
 add_subdirectory("libs/catch2")
 
@@ -176,12 +201,18 @@ set(SOURCE_FILES
     src/rwe/AudioService.h
     src/rwe/BoxTreeSplit.cpp
     src/rwe/BoxTreeSplit.h
+    src/rwe/CampaignProgress.cpp
+    src/rwe/CampaignProgress.h
     src/rwe/ColorPalette.cpp
     src/rwe/ColorPalette.h
     src/rwe/CroppedViewport.cpp
     src/rwe/CroppedViewport.h
     src/rwe/CursorService.cpp
     src/rwe/CursorService.h
+    src/rwe/EndMissionScene.cpp
+    src/rwe/EndMissionScene.h
+    src/rwe/EndMissionScene_util.cpp
+    src/rwe/EndMissionScene_util.h
     src/rwe/GlobalConfig.cpp
     src/rwe/GlobalConfig.h
     src/rwe/ImGuiContext.cpp
@@ -208,6 +239,8 @@ set(SOURCE_FILES
     src/rwe/RenderService.h
     src/rwe/SceneContext.h
     src/rwe/SelectionMesh.h
+    src/rwe/SkirmishSettings.cpp
+    src/rwe/SkirmishSettings.h
     src/rwe/ShaderService.cpp
     src/rwe/ShaderService.h
     src/rwe/TextureService.cpp
@@ -289,6 +322,7 @@ set(SOURCE_FILES
     src/rwe/game/WeaponMediaInfo.h
     src/rwe/game/dump_util.cpp
     src/rwe/game/dump_util.h
+    src/rwe/game/selection_util.h
     src/rwe/game/matrix_util.cpp
     src/rwe/game/matrix_util.h
     src/rwe/geometry/BoundingBox3f.h
@@ -316,6 +350,8 @@ set(SOURCE_FILES
     src/rwe/grid/Point.h
     src/rwe/io/_3do/_3do.cpp
     src/rwe/io/_3do/_3do.h
+    src/rwe/io/campaigntdf/CampaignTdf.cpp
+    src/rwe/io/campaigntdf/CampaignTdf.h
     src/rwe/io/cob/Cob.cpp
     src/rwe/io/cob/Cob.h
     src/rwe/io/fbi/UnitFbi.h
@@ -437,6 +473,14 @@ set(SOURCE_FILES
     src/rwe/resource_io.h
     src/rwe/rwe_time.cpp
     src/rwe/rwe_time.h
+    src/rwe/save/SaveCodec.cpp
+    src/rwe/save/SaveCodec.h
+    src/rwe/save/SaveGameService.cpp
+    src/rwe/save/SaveGameService.h
+    src/rwe/save/SaveListDialog.cpp
+    src/rwe/save/SaveListDialog.h
+    src/rwe/save/SavedGame.cpp
+    src/rwe/save/SavedGame.h
     src/rwe/scene/Scene.h
     src/rwe/scene/SceneManager.cpp
     src/rwe/scene/SceneManager.h
@@ -447,6 +491,10 @@ set(SOURCE_FILES
     src/rwe/sdl/SdlException.h
     src/rwe/sdl/SdlMixerContext.h
     src/rwe/sdl/SdlMixerException.h
+    src/rwe/sim/CampaignAi.cpp
+    src/rwe/sim/CampaignAi.h
+    src/rwe/sim/CampaignAiProfile.cpp
+    src/rwe/sim/CampaignAiProfile.h
     src/rwe/sim/Energy.cpp
     src/rwe/sim/Energy.h
     src/rwe/sim/FeatureDefinition.cpp
@@ -457,6 +505,7 @@ set(SOURCE_FILES
     src/rwe/sim/GameHash.h
     src/rwe/sim/GameHash_util.cpp
     src/rwe/sim/GameHash_util.h
+    src/rwe/sim/FeatureSimulation.cpp
     src/rwe/sim/GameSimulation.cpp
     src/rwe/sim/GameSimulation.h
     src/rwe/sim/GameTime.cpp
@@ -466,6 +515,13 @@ set(SOURCE_FILES
     src/rwe/sim/MapTerrain.cpp
     src/rwe/sim/MapTerrain.h
     src/rwe/sim/Metal.h
+    src/rwe/sim/MeteorShower.cpp
+    src/rwe/sim/MeteorShower.h
+    src/rwe/sim/MissionInfo.h
+    src/rwe/sim/MissionInitialCommand.cpp
+    src/rwe/sim/MissionInitialCommand.h
+    src/rwe/sim/MissionObjectives.cpp
+    src/rwe/sim/MissionObjectives.h
     src/rwe/sim/MovementClassCollisionService.cpp
     src/rwe/sim/MovementClassCollisionService.h
     src/rwe/sim/MovementClassDatabase.cpp
@@ -486,6 +542,7 @@ set(SOURCE_FILES
     src/rwe/sim/SimTicksPerSecond.h
     src/rwe/sim/SimVector.h
     src/rwe/sim/UnitBehaviorService.cpp
+    src/rwe/sim/AircraftService.cpp
     src/rwe/sim/UnitBehaviorService.h
     src/rwe/sim/UnitBehaviorService_util.cpp
     src/rwe/sim/UnitBehaviorService_util.h
@@ -496,6 +553,7 @@ set(SOURCE_FILES
     src/rwe/sim/UnitMesh.h
     src/rwe/sim/UnitModelDefinition.cpp
     src/rwe/sim/UnitModelDefinition.h
+    src/rwe/sim/UnitMoveOrders.h
     src/rwe/sim/UnitOrder.h
     src/rwe/sim/UnitPieceDefinition.cpp
     src/rwe/sim/UnitPieceDefinition.h
@@ -526,10 +584,14 @@ set(SOURCE_FILES
     src/rwe/ui/UiPanel.h
     src/rwe/ui/UiScrollBar.cpp
     src/rwe/ui/UiScrollBar.h
+    src/rwe/ui/UiSlider.cpp
+    src/rwe/ui/UiSlider.h
     src/rwe/ui/UiStagedButton.cpp
     src/rwe/ui/UiStagedButton.h
     src/rwe/ui/UiSurface.cpp
     src/rwe/ui/UiSurface.h
+    src/rwe/ui/UiTextBox.cpp
+    src/rwe/ui/UiTextBox.h
     src/rwe/ui/events.cpp
     src/rwe/ui/events.h
     src/rwe/util.cpp
@@ -541,6 +603,8 @@ set(SOURCE_FILES
     src/rwe/util/OpaqueUnit.h
     src/rwe/util/Result.h
     src/rwe/util/SharedHandle.h
+    src/rwe/util/ConfigFile.cpp
+    src/rwe/util/ConfigFile.h
     src/rwe/util/UniqueHandle.h
     src/rwe/util/collection_util.h
     src/rwe/util/match.h
@@ -576,7 +640,13 @@ target_include_directories(librwe PUBLIC "src")
 configure_file("src/rwe/config.h.in" "config/rwe/config.h" @ONLY)
 target_include_directories(librwe PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/config")
 
-target_include_directories(librwe PUBLIC "libs/asio/asio/include")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/asio/asio/include/asio.hpp")
+    target_include_directories(librwe PUBLIC "libs/asio/asio/include")
+else()
+    # Newer Asio trees place include/ at their root. Source-only exports
+    # do not retain the local compatibility symlink for the older layout.
+    target_include_directories(librwe PUBLIC "libs/asio/include")
+endif()
 add_definitions(-DASIO_STANDALONE)
 if(WIN32)
     # winsock needed for asio on windows
@@ -655,6 +725,45 @@ add_custom_command(TARGET librwe PRE_BUILD
 add_executable(rwe src/main.cpp)
 target_link_libraries(rwe librwe)
 
+if(APPLE)
+    if(CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(RWE_MACOS_MINIMUM_VERSION "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    else()
+        execute_process(COMMAND sw_vers -productVersion OUTPUT_VARIABLE RWE_MACOS_HOST_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
+        string(REGEX MATCH "^[0-9]+\\.[0-9]+" RWE_MACOS_MINIMUM_VERSION "${RWE_MACOS_HOST_VERSION}")
+    endif()
+    # Finder-launchable macOS bundle sharing the same entry point and
+    # librwe as the plain `rwe` CLI target (which remains the normal
+    # executable). Bundle shaders without custom artwork or retail data.
+    # Publication resource policy modified 2026-10-20; see PUBLICATION.md.
+    add_executable(ta_transplant MACOSX_BUNDLE src/main.cpp)
+    target_link_libraries(ta_transplant librwe)
+    include(packaging/macos/Icon.cmake)
+    set_target_properties(ta_transplant PROPERTIES
+        OUTPUT_NAME "TA Transplant"
+        MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/packaging/macos/Info.plist.in"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.kuh9325.TATransplant"
+        MACOSX_BUNDLE_BUNDLE_NAME "TA Transplant"
+        MACOSX_BUNDLE_INFO_STRING "TA Transplant ${RWE_GIT_DESCRIPTION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_COPYRIGHT "Robot War Engine contributors (GPL)"
+    )
+    add_custom_command(TARGET ta_transplant POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/shaders" "$<TARGET_FILE_DIR:ta_transplant>/../Resources/shaders")
+    if(RWE_STANDALONE_MACOS)
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        set(RWE_MACOS_PACKAGE_DIR "${CMAKE_BINARY_DIR}/standalone" CACHE PATH "New destination for the unsigned standalone bundle (must not exist)")
+        add_custom_target(ta_transplant_package
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/shaders" "$<TARGET_FILE_DIR:ta_transplant>/../Resources/shaders"
+            COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/macos_bundle.py" package
+                "$<TARGET_BUNDLE_DIR:ta_transplant>" --output "${RWE_MACOS_PACKAGE_DIR}"
+                --source "${PROJECT_SOURCE_DIR}"
+            DEPENDS ta_transplant
+            VERBATIM)
+    endif()
+endif()
+
 if(UNIX AND NOT APPLE)
     file(WRITE "${CMAKE_BINARY_DIR}/run.sh" "#!/bin/bash
 # The devbox-built binary links against Nix's libglvnd, which can't find
@@ -718,6 +827,10 @@ if(WIN32)
     target_compile_definitions(texture_test PRIVATE __STDC_LIB_EXT1__=1)
 endif()
 
+# headless sim benchmark harness (profiling tool; not part of the test suite)
+add_executable(rwe_bench src/rwe_bench.cpp)
+target_link_libraries(rwe_bench librwe)
+
 add_executable(rwe_bridge src/bridge.cpp)
 target_link_libraries(rwe_bridge PRIVATE librwe)
 target_link_libraries(rwe_bridge PRIVATE nlohmann_json::nlohmann_json)
@@ -729,11 +842,20 @@ endif()
 
 set(TEST_FILES
     src/rwe/BoxTreeSplit.test.cpp
+    src/rwe/CampaignClosure.test.cpp
+    src/rwe/CampaignProgress.test.cpp
+    src/rwe/EndMissionScene_util.test.cpp
     src/rwe/Viewport.test.cpp
     src/rwe/cob/cob_util.test.cpp
     src/rwe/collections/MinHeap.test.cpp
     src/rwe/collections/VectorMap.test.cpp
+    src/rwe/game/GameScene_util.test.cpp
+    src/rwe/game/GameNetworkService.test.cpp
+    src/rwe/game/PlayerCommandService.test.cpp
+    src/rwe/game/SceneTickScheduler.test.cpp
     src/rwe/game/dump_util.test.cpp
+    src/rwe/game/matrix_util.test.cpp
+    src/rwe/game/selection_util.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
     src/rwe/geometry/Circle2f.test.cpp
     src/rwe/geometry/CollisionMesh.test.cpp
@@ -745,6 +867,8 @@ set(TEST_FILES
     src/rwe/grid/EightWayDirection.test.cpp
     src/rwe/grid/Grid.test.cpp
     src/rwe/grid/Point.test.cpp
+    src/rwe/io/campaigntdf/CampaignTdf.test.cpp
+    src/rwe/io/fbi/io.test.cpp
     src/rwe/io/featuretdf/io.test.cpp
     src/rwe/io/gui/gui.test.cpp
     src/rwe/io/ota/ota.test.cpp
@@ -753,7 +877,11 @@ set(TEST_FILES
     src/rwe/io/tdf/NetSchemaTdfAdapter.test.cpp
     src/rwe/io/tdf/SimpleTdfAdapter.test.cpp
     src/rwe/io/tdf/TdfBlock.test.cpp
+    src/rwe/io/tnt/TntArchive.test.cpp
     src/rwe/ip_util.test.cpp
+    src/rwe/LoadingScene_util.test.cpp
+    src/rwe/RenderService.test.cpp
+    src/rwe/mesh_util.test.cpp
     src/rwe/math/Matrix4f.test.cpp
     src/rwe/math/Vector2f.test.cpp
     src/rwe/math/Vector3f.test.cpp
@@ -762,17 +890,42 @@ set(TEST_FILES
     src/rwe/pathfinding/pathfinding_utils.test.cpp
     src/rwe/proto/serialization.test.cpp
     src/rwe/rc_gen_optional.h
+    src/rwe/save/SaveGameService.test.cpp
+    src/rwe/save/SavedGame.test.cpp
+    src/rwe/sim/CampaignAi.test.cpp
+    src/rwe/sim/CampaignAiProfile.test.cpp
+    src/rwe/sim/cob.test.cpp
+    src/rwe/SkirmishClosure.test.cpp
     src/rwe/sim/GameHash_util.test.cpp
+    src/rwe/sim/GameSimulation.test.cpp
+    src/rwe/sim/MapTerrain.test.cpp
+    src/rwe/sim/MissionInitialCommand.test.cpp
+    src/rwe/sim/MissionObjectives.test.cpp
     src/rwe/sim/SimAngle.test.cpp
     src/rwe/sim/SimVector.test.cpp
     src/rwe/sim/UnitBehaviorService.test.cpp
+    src/rwe/sim/Emp.test.cpp
+    src/rwe/sim/Bomber.test.cpp
+    src/rwe/sim/DestructibleFeatures.test.cpp
+    src/rwe/sim/Veterancy.test.cpp
+    src/rwe/sim/AircraftService.test.cpp
+    src/rwe/sim/Kamikaze.test.cpp
     src/rwe/sim/UnitState.test.cpp
     src/rwe/sim/UnitState_util.test.cpp
     src/rwe/sim/util.test.cpp
+    src/rwe/ui/button_sound_util.test.cpp
+    src/rwe/ui/difficulty_util.test.cpp
+    src/rwe/ui/narration_util.test.cpp
+    src/rwe/ui/UiFactory.test.cpp
+    src/rwe/ui/UiListBox.test.cpp
+    src/rwe/ui/UiPanel.test.cpp
+    src/rwe/ui/UiStagedButton.test.cpp
+    src/rwe/util/ConfigFile.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp
     src/rwe/util/Result.test.cpp
     src/rwe/util/SimpleLogger.test.cpp
     src/rwe/util/rwe_string.test.cpp
+    src/rwe/util.test.cpp
     )
 
 add_executable(rwe_test ${TEST_FILES})
@@ -781,6 +934,8 @@ target_link_libraries(rwe_test rapidcheck_catch)
 target_link_libraries(rwe_test librwe)
 target_precompile_headers(rwe_test REUSE_FROM librwe)
 add_test(NAME rwe_test COMMAND rwe_test)
+add_test(NAME rwe_followup_regressions COMMAND rwe_test "[followup]")
+set_tests_properties(rwe_followup_regressions PROPERTIES TIMEOUT 90)
 
 install(TARGETS rwe rwe_bridge
     RUNTIME DESTINATION .

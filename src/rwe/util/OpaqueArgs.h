@@ -24,6 +24,11 @@ namespace rwe
             for (int i = 1; i < argc; ++i)
             {
                 std::string arg(argv[i]);
+                // legacy Finder/LaunchServices process serial argument
+                if (arg.rfind("-psn_", 0) == 0)
+                {
+                    continue;
+                }
                 if (arg.size() < 3 || arg[0] != '-' || arg[1] != '-')
                 {
                     throw std::runtime_error("Unexpected argument: " + arg);

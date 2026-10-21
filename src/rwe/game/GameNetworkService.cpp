@@ -29,20 +29,70 @@ namespace rwe
 
     GameNetworkService::~GameNetworkService()
     {
-        if (networkThread.joinable())
-        {
-            ioContext.stop();
-            networkThread.join();
-        }
+        stop();
     }
 
     void GameNetworkService::start()
     {
-        networkThread = std::thread(&GameNetworkService::run, this);
+        std::lock_guard<std::mutex> lock(lifecycleMutex);
+        if (status.load() != Status::NotStarted)
+        {
+            return;
+        }
+        if (endpoints.empty())
+        {
+            // Single-player does not need a socket or an I/O thread. In
+            // particular, an unrelated process owning the UDP port must not
+            // prevent local simulation from starting.
+            status.store(Status::Running);
+            return;
+        }
+        status.store(Status::Starting);
+        try
+        {
+            networkThread = std::thread(&GameNetworkService::run, this);
+        }
+        catch (...)
+        {
+            status.store(Status::Failed);
+            throw;
+        }
+    }
+
+    void GameNetworkService::stop()
+    {
+        std::lock_guard<std::mutex> lock(lifecycleMutex);
+        // stop() is thread-safe and wakes run(); no posted handler is needed.
+        if (status.load() != Status::Failed)
+        {
+            status.store(Status::Stopped);
+        }
+        ioContext.stop();
+        if (networkThread.joinable())
+        {
+            networkThread.join();
+        }
+        asio::error_code ignored;
+        socket.close(ignored);
+        // The timer is destroyed with the service after the executor stopped;
+        // no cancel handler needs dispatching during shutdown.
+    }
+
+    bool GameNetworkService::acceptsSubmissions() const
+    {
+        const auto state = status.load();
+        return state == Status::NotStarted || state == Status::Starting || state == Status::Running;
     }
 
     void GameNetworkService::submitCommands(SceneTime currentSceneTime, const GameNetworkService::CommandSet& commands)
     {
+        // no peers to send to -- skip the post entirely; with endpoints
+        // empty the posted lambda only writes fields nothing reads
+        if (endpoints.empty() || !acceptsSubmissions())
+        {
+            return;
+        }
+
         asio::post(ioContext,[this, currentSceneTime, commands]() {
             this->currentSceneTime = currentSceneTime;
             for (auto& e : endpoints)
@@ -54,6 +104,12 @@ namespace rwe
 
     void GameNetworkService::submitGameHash(GameHash hash)
     {
+        // no peers -- nothing consumes hashSendBuffer
+        if (endpoints.empty() || !acceptsSubmissions())
+        {
+            return;
+        }
+
         asio::post(ioContext,[this, hash]() {
             for (auto& e : endpoints)
             {
@@ -64,35 +120,36 @@ namespace rwe
 
     SceneTime GameNetworkService::estimateAvergeSceneTime(SceneTime localSceneTime)
     {
-        std::promise<unsigned int> result;
-        asio::post(ioContext,[this, localSceneTime, &result]() {
-            auto time = getTimestamp();
-            auto otherTimes = choose(endpoints, [](const auto& e) { return e.lastKnownSceneTime; });
-
-            auto finalValue = estimateAverageSceneTimeStatic(localSceneTime, otherTimes, time);
-            result.set_value(finalValue);
-        });
-
-        return SceneTime(result.get_future().get());
+        // Never wait for the executor: it may be busy, stopped, or failed.
+        if (status.load() != Status::Running)
+        {
+            return localSceneTime;
+        }
+        const auto snapshot = std::atomic_load(&timingSnapshot);
+        return SceneTime(estimateAverageSceneTimeStatic(localSceneTime, snapshot->peerSceneTimes, getTimestamp()));
     }
 
     float GameNetworkService::getMaxAverageRttMillis()
     {
-        std::promise<float> result;
-        asio::post(ioContext,[this, &result]() {
-            auto maxRtt = 0.0f;
-            for (const auto& e : endpoints)
+        if (status.load() != Status::Running)
+        {
+            return 0.0f;
+        }
+        return std::atomic_load(&timingSnapshot)->maxRttMillis;
+    }
+
+    void GameNetworkService::publishTimingSnapshot()
+    {
+        auto snapshot = std::make_shared<TimingSnapshot>();
+        for (const auto& e : endpoints)
+        {
+            if (e.lastKnownSceneTime)
             {
-                if (e.averageRoundTripTime > maxRtt)
-                {
-                    maxRtt = e.averageRoundTripTime;
-                }
+                snapshot->peerSceneTimes.push_back(*e.lastKnownSceneTime);
             }
-
-            result.set_value(maxRtt);
-        });
-
-        return result.get_future().get();
+            snapshot->maxRttMillis = std::max(snapshot->maxRttMillis, e.averageRoundTripTime);
+        }
+        std::atomic_store(&timingSnapshot, std::shared_ptr<const TimingSnapshot>(std::move(snapshot)));
     }
 
     void GameNetworkService::run()
@@ -102,6 +159,18 @@ namespace rwe
             auto endpoint = asio::ip::udp::endpoint(asio::ip::udp::v6(), port);
             socket.open(endpoint.protocol());
             socket.bind(endpoint);
+            // BSD/macOS defaults can reject a complete large selection even
+            // below the UDP payload maximum unless SO_SNDBUF is enlarged.
+            socket.set_option(asio::socket_base::send_buffer_size(MaxDatagramSize));
+            socket.set_option(asio::socket_base::receive_buffer_size(MaxDatagramSize * 4));
+            // UDP writes must not pin shutdown behind a full kernel buffer.
+            socket.non_blocking(true);
+            localPort.store(socket.local_endpoint().port());
+            auto expected = Status::Starting;
+            if (!status.compare_exchange_strong(expected, Status::Running))
+            {
+                return;
+            }
 
             listenForNextMessage();
 
@@ -111,8 +180,17 @@ namespace rwe
         }
         catch (const std::exception& e)
         {
+            std::atomic_store(&failureReason, std::make_shared<const std::string>(e.what()));
+            status.store(Status::Failed);
             LOG_ERROR << "Network thread died with error: " << e.what();
         }
+        catch (...)
+        {
+            std::atomic_store(&failureReason, std::make_shared<const std::string>("Unknown network thread exception"));
+            status.store(Status::Failed);
+        }
+        auto expected = Status::Running;
+        status.compare_exchange_strong(expected, Status::Stopped);
     }
 
     void GameNetworkService::listenForNextMessage()
@@ -121,6 +199,10 @@ namespace rwe
             asio::buffer(receiveBuffer.data(), receiveBuffer.size()),
             currentRemoteEndpoint,
             [this](const auto& error, const auto& bytesTransferred) {
+                if (error == asio::error::operation_aborted || status.load() != Status::Running)
+                {
+                    return;
+                }
                 receive(error, bytesTransferred);
                 listenForNextMessage();
             });
@@ -149,6 +231,8 @@ namespace rwe
         m.set_next_game_hash_to_receive(nextHashToReceive.value);
         m.set_ack_delay(ackDelay.count());
 
+        constexpr std::size_t maxMessageSize = 65507 - 4;
+        constexpr std::size_t normalMessageSize = 1500 - 4;
         for (const auto& set : sendBuffer)
         {
             auto& setMessage = *m.add_command_set();
@@ -158,11 +242,27 @@ namespace rwe
                 auto& cmdMessage = *setMessage.add_command();
                 serializePlayerCommand(cmd, cmdMessage);
             }
+            const auto size = outerMessage.ByteSizeLong();
+            if (size > maxMessageSize || (m.command_set_size() > 1 && size > normalMessageSize))
+            {
+                m.mutable_command_set()->RemoveLast();
+                if (m.command_set_size() == 0)
+                {
+                    throw std::runtime_error("One command set exceeds the UDP payload limit");
+                }
+                break;
+            }
         }
 
+        const auto hashPacketLimit = std::max(normalMessageSize, outerMessage.ByteSizeLong());
         for (const auto& hash : gameHashBuffer)
         {
             m.add_game_hashes(hash.value);
+            if (outerMessage.ByteSizeLong() > std::min(maxMessageSize, hashPacketLimit))
+            {
+                m.mutable_game_hashes()->RemoveLast();
+                break;
+            }
         }
 
         return outerMessage;
@@ -216,9 +316,22 @@ namespace rwe
         // throw in a CRC to verify the message
         writeInt(&sendBuffer[messageSize], computeCrc(sendBuffer.data(), messageSize));
 
-        socket.send_to(asio::buffer(sendBuffer.data(), messageSize + 4), endpoint.endpoint);
+        asio::error_code error;
+        socket.send_to(asio::buffer(sendBuffer.data(), messageSize + 4), endpoint.endpoint, 0, error);
+        if (error)
+        {
+            if (error == asio::error::message_size || error == asio::error::bad_descriptor ||
+                error == asio::error::invalid_argument || error == asio::error::operation_not_supported)
+            {
+                throw std::runtime_error("Cannot send game update: " + error.message());
+            }
+            // Keep queued commands and retry next tick. A transient UDP error
+            // must not kill the executor or lose a command set.
+            LOG_WARN << "Could not send game update: " << error.message();
+            return;
+        }
 
-        auto nextSequenceNumber = SequenceNumber(endpoint.nextCommandToSend.value + (endpoint.sendBuffer.size()));
+        auto nextSequenceNumber = SequenceNumber(endpoint.nextCommandToSend.value + message.game_update().command_set_size());
         if (endpoint.sendTimes.empty() || endpoint.sendTimes.back().first < nextSequenceNumber)
         {
             endpoint.sendTimes.emplace_back(nextSequenceNumber, sendTime);
@@ -264,8 +377,7 @@ namespace rwe
         }
 
         proto::NetworkMessage outerMessage;
-        outerMessage.ParseFromArray(receiveBuffer.data(), receivedBytes - 4);
-        if (!outerMessage.has_game_update())
+        if (!outerMessage.ParseFromArray(receiveBuffer.data(), receivedBytes - 4) || !outerMessage.has_game_update())
         {
             // message wasn't a game update, ignore it
             LOG_DEBUG << "Not game update, ignoring";
@@ -308,11 +420,15 @@ namespace rwe
             roundTripTime = roundTripTime > ackDelay ? roundTripTime - ackDelay : std::chrono::milliseconds(0);
             auto rttMillis = std::chrono::duration_cast<std::chrono::milliseconds>(roundTripTime).count();
             endpoint.averageRoundTripTime = ema(rttMillis, endpoint.averageRoundTripTime, 0.1f);
+            // Consume each measurement once. Repeated idle ACKs otherwise
+            // measure from the first ever send and inflate RTT indefinitely.
+            endpoint.sendTimes.pop_front();
             LOG_DEBUG << "Average RTT: " << endpoint.averageRoundTripTime << "ms";
         }
 
         auto extraFrames = static_cast<unsigned int>((endpoint.averageRoundTripTime / 2.0f) * SimTicksPerSecond / 1000.0f);
         endpoint.lastKnownSceneTime = std::make_pair(SceneTime(message.current_scene_time() + extraFrames), receiveTime);
+        publishTimingSnapshot();
         LOG_DEBUG << "Estimated peer scene time: " << endpoint.lastKnownSceneTime->first.value;
 
         SequenceNumber firstCommandNumber(message.next_command_set_to_send());

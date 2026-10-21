@@ -56,6 +56,10 @@ namespace rwe
 
             std::optional<std::pair<Cost, const VertexInfo*>> closestVertex;
 
+            // successor scratch is reused across expansions so the
+            // per-vertex vector allocation happens once, not per pop
+            std::vector<VertexInfo> successors;
+
             unsigned int openListPopsPerformed = 0;
 
             while (!openVertices.empty() && openListPopsPerformed < MaxOpenListQueries)
@@ -77,7 +81,9 @@ namespace rwe
                     closestVertex = std::pair<Cost, const VertexInfo*>(estimatedCostToGoal, &current);
                 }
 
-                for (const VertexInfo& s : getSuccessors(current))
+                successors.clear();
+                getSuccessors(current, successors);
+                for (const VertexInfo& s : successors)
                 {
                     if (closedVertices.find(s.vertex) != closedVertices.end())
                     {
@@ -98,7 +104,7 @@ namespace rwe
 
         virtual Cost estimateCostToGoal(const T& vertex) = 0;
 
-        virtual std::vector<VertexInfo> getSuccessors(const VertexInfo& vertex) = 0;
+        virtual void getSuccessors(const VertexInfo& vertex, std::vector<VertexInfo>& out) = 0;
 
     private:
         std::vector<T> walkPath(const VertexInfo& info)
