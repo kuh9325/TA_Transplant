@@ -656,5 +656,34 @@
       "source_commit": "d79fa8e2480586631b003de9758d814d3e9137e6",
       "scope": "included superproject"
     }
-  ]
+  ],
+  "phase10h_notice_supplement": {
+    "date": "2026-10-21",
+    "applies_to": "cmake/Modules/NSIS.template.in (current and retained historical copies)",
+    "notice": "licenses/CMake-3.10.3-Copyright.txt",
+    "notice_sha256": "64db3d501cbb495b47c09e2a552e575b2535a441947fa1163f66f15b5601f5ba",
+    "source": "https://github.com/Kitware/CMake/blob/v3.10.3/Copyright.txt",
+    "template_source": "https://github.com/Kitware/CMake/blob/v3.10.3/Modules/NSIS.template.in",
+    "import_commit": "324fd30ea0a761651844c8d3679e480bafd24682",
+    "normalization": "LF and trailing blank lines for template comparison; full notice text retained",
+    "pins_changed": false
+  },
+  "phase10i_notice_supplement": {
+    "date": "2026-10-22",
+    "cmake_notice_also_embedded_in": "cmake/Modules/NSIS.template.in (comments only; original body unchanged)",
+    "hash_permutation": {
+      "repository": "https://github.com/skeeto/hash-prospector",
+      "revision": "396dbe235c94dfc2e9b559fc965bcfda8b6a122c",
+      "readme_blob": "63f204ac83a8cf10a66f07273f7dbbbe56218837",
+      "license_blob": "68a49daad8ff7e35068f2b7a97d643aab440eaec",
+      "applies_to": "src/rwe/grid/StateHashGrid.h:24-29 (avalanche only)",
+      "match": "same uint32 xorshift/multiply operations and constants as lowbias32; final xor returned directly; literal u suffixes added",
+      "license": "Unlicense",
+      "notice": "licenses/hash-prospector-UNLICENSE.txt",
+      "notice_sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+      "historical_copy_route": "not established; matching permissively licensed implementation verified",
+      "wrapper": "locally authored project GPL code; entire file not relicensed"
+    },
+    "pins_changed": false
+  }
 }

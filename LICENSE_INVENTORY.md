@@ -14,11 +14,11 @@ Primary source: [CMake v3.0.2 Copyright.txt](https://raw.githubusercontent.com/K
 
 | Paths | Evidence and status |
 |---|---|
-| RWE engine and modified/new C++ and GLSL | Existing repository license and Git/source continuity retained. Rights confirmation for downstream contributions remains open; a Git author record alone does not establish ownership. |
+| RWE engine and modified/new C++ and GLSL | Existing repository license and Git/source continuity retained. GPL permits compliant downstream modifications without new permission from every upstream author. Phase 10J resolves all 110 paths: 97 verified owner-directed agent outputs, 12 verified GPL derivatives and 1 verified third-party license; zero unresolved. See PROVENANCE_REVIEW.md and PUBLICATION_PROVENANCE_ADDENDUM.md. |
 | `src/rwe/math/rwe_math.cpp` | Existing round-up algorithm links to [Bit Twiddling Hacks](https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2). That source grants public-domain use of individual snippets unless noted; its prose collection is separately copyrighted. Existing link retained; no copied article added. |
 | `libs/png++-0.2.9/png++/**` | BSD-style COPYING and source notices; `test/README` states permission for PngSuite image use, copying and distribution. Existing 941 PNG fixtures/outputs retained. No game artwork added. |
 | `launcher/src/launcher/font/**` | Twelve inherited Roboto fonts and Apache-2.0 license retained. |
-| Documentation and scripts | Existing upstream material and source references preserved. Downstream contribution provenance requires owner confirmation; no external ownership inferred. |
+| Documentation and scripts | Existing upstream material and source references preserved. New source/tooling attribution is recorded; the 110 paths have final Phase 10J classifications with zero unresolved source origins; exclusive ownership is not certified. No external ownership is inferred. |
 | Game names and product branding | Descriptive names, app strings and non-affiliation statement remain. No trademark clearance is asserted. Custom reconstructed icon and review artwork remain excluded. |
 
 ## Pinned dependencies
@@ -58,3 +58,17 @@ The `license_evidence_files` array in SOURCE_DEPENDENCIES.json lists 72 files/he
 Built-in dr_libs and stb_vorbis preserve their complete dual-license text; hidapi and yuv2rgb preserve separate terms. TiMidity retains COPYING, README and source headers. No silent license selection is made here. The known binary packager gap remains separate: it copies TiMidity COPYING without README and takes a utf8_range notice from a source revision that must be matched to the actual host dylib. No binary is approved by this inventory.
 
 No npm packages, host GLEW/Protobuf/Abseil binaries, game data, saves, proprietary icons or Git histories are bundled. Launcher package declarations/lockfile remain; a launcher binary would need its own resolved dependency and notice inventory.
+
+## Phase 10H correction: inherited CMake installer template
+
+`cmake/Modules/NSIS.template.in` is a third-party CMake template, not solely RWE-authored GPL source. RWE import commit `324fd30ea0a761651844c8d3679e480bafd24682` explicitly records the copy; its content matches [CMake 3.10.3 Modules/NSIS.template.in](https://github.com/Kitware/CMake/blob/v3.10.3/Modules/NSIS.template.in) after line-ending/trailing-blank-line normalization. The later RWE start-menu modification is retained. This comparison identifies a matching licensed release, not the exact version installed by the original importer.
+
+The complete [CMake copyright/license notice](licenses/CMake-3.10.3-Copyright.txt), verified against [the official 3.10.3 Copyright.txt](https://github.com/Kitware/CMake/blob/v3.10.3/Copyright.txt), now accompanies the template and its retained historical copies. The BSD conditions permit redistribution and modification with notice retention; separate rights-holder permission is not needed for this correction. The existing NSIS script-source and author references remain in the template. No executable template line changed.
+
+The root GPL, three FindSDL module notices, png++/PngSuite notices, Roboto Apache text and embedded font copyright/license records are retained. No missing mandatory notice is currently identified in the reviewed superproject tree after this correction. Dependency binaries and expanded archives retain the separate unresolved scope described above.
+
+## Phase 10I refinement: in-file CMake notice and hash permutation
+
+The complete CMake 3.10.3 notice is now also prepended as NSIS comment lines in `cmake/Modules/NSIS.template.in`; the original CRLF template body is byte-identical. Existing FindSDL2/FindSDL2_image/FindSDL2_mixer notices and every original author line are unchanged.
+
+`src/rwe/grid/StateHashGrid.h::avalanche` (lines 24–29) uses the same shifts/multipliers as `lowbias32` in [hash-prospector](https://github.com/skeeto/hash-prospector/blob/396dbe235c94dfc2e9b559fc965bcfda8b6a122c/README.md), verified at `396dbe235c94dfc2e9b559fc965bcfda8b6a122c`. The matching implementation is available under the [retained Unlicense](licenses/hash-prospector-UNLICENSE.txt). Its final xor is returned directly and unsigned literal suffixes are added. This verifies a permissive source basis for the snippet; it does not identify the historical copying route or relicense the locally authored wrapper. No gameplay source was changed.

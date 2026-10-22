@@ -1,81 +1,34 @@
 # TA Transplant
 
-A preservation-focused **Apple Silicon / modern macOS compatibility fork of Robot War Engine (RWE)**, aimed at reproducing the original **Total Annihilation** experience with user-supplied retail game data.
+TA Transplant is an independently developed Apple Silicon / macOS compatibility fork of [Robot War Engine (RWE)](https://github.com/MHeasell/rwe), designed to work with separately supplied Total Annihilation game data.
 
-TA Transplant does not contain original Total Annihilation source code or game assets. It builds on the open-source [Robot War Engine](https://github.com/MHeasell/rwe) codebase and adds platform fixes, compatibility work, and original-TA behavior restoration where the upstream engine differs from the retail game.
+**Unofficial independent project.** TA Transplant is not officially affiliated with, sponsored by, or endorsed by the rights holders of Total Annihilation, its original developers or publishers, or the upstream RWE project. References to Total Annihilation identify the game and data formats this software aims to support. They do not imply an official port or release.
 
-> **Status:** uncommitted source publication review candidate; owner review and provenance confirmation pending. Not a finished replacement for every original Total Annihilation feature.
+**Status:** owner-approved Option B source publication candidate. The TA Transplant name, independent/unofficial disclaimer, icon-free source scope, exclusion of proprietary retail assets, sanitized history, and retained upstream attribution/license notices are final owner decisions. Phase 10J resolves the source-provenance review. Remote publication remains separately unauthorized. No binary release is approved.
 
-## Project Goals
+## Source and attribution
 
-- Run RWE natively on modern Apple Silicon macOS.
-- Preserve original Total Annihilation gameplay behavior rather than redesign it.
-- Fix architecture-dependent behavior only when there is concrete evidence of a divergence.
-- Restore missing original-TA commands and UI behavior incrementally.
-- Keep original Total Annihilation data outside the repository.
-- Avoid unnecessary renderer or engine rewrites when the existing path is already viable.
+This project builds on RWE, developed by Michael Heasell and other RWE contributors. Their source, history and existing copyright and license notices are retained. Downstream work adds macOS support and compatibility changes; this fork does not claim sole authorship of the engine.
 
-See [PUBLICATION.md](PUBLICATION.md) for source provenance, publication exclusions, and validation limits. Historical local audit material is not included in this source distribution.
+The inherited sponsorship link in `.github/FUNDING.yml` points to the upstream RWE maintainer. It is not a funding channel for this fork or evidence of upstream endorsement.
 
-## Relationship to Robot War Engine
+See [PUBLICATION.md](PUBLICATION.md), [PROVENANCE_REVIEW.md](PROVENANCE_REVIEW.md), [DOWNSTREAM_PROVENANCE.json](DOWNSTREAM_PROVENANCE.json) and [LICENSE_INVENTORY.md](LICENSE_INVENTORY.md) for the source basis and retained notices.
 
-This repository is a downstream compatibility fork of **Robot War Engine (RWE)**.
+## Game data and artwork
 
-RWE provides the core engine, including:
-
-- Total Annihilation archive and data-format support;
-- deterministic simulation infrastructure;
-- unit, weapon, projectile, resource, pathfinding, and COB-script systems;
-- OpenGL rendering;
-- SDL-based platform/input support;
-- multiplayer/networking infrastructure;
-- the Electron-based launcher.
-
-TA Transplant keeps that architecture and focuses on modern macOS support plus original-game compatibility gaps.
-
-Upstream project: [MHeasell/rwe](https://github.com/MHeasell/rwe)
-
-## Current macOS Status
-
-This source review candidate incorporates the approved C2 native-development source snapshot. The historical integrated baseline passed 583 tests / 695,342 assertions. That is automated coverage, not complete retail parity or human acceptance.
-
-It includes the simulation, command, mission, save, network, renderer and macOS packaging changes present in that baseline. All native engine source, tests, protocol definitions and 22 shaders are retained without byte changes by this publication preparation. Save writer v16 and hash contract 2 are retained.
-
-## Known Compatibility Gaps
-
-Full mission breadth, cross-architecture determinism, live multiplayer, save compatibility, interactive gameplay, and clean external-Mac validation remain qualified or pending. No stable signed/notarized binary release is claimed.
-
-This source distribution deliberately omits custom application artwork. Its macOS bundle uses an icon-independent resource configuration; the operating system may display a generic application icon. No generic icon image is copied into this repository.
-
-## Original Total Annihilation Data
-
-**Original game data is not included.**
-
-You must supply data from a legally owned Total Annihilation installation.
-
-RWE can use an external directory directly:
+Original retail game assets are not distributed with this project. Users must supply legitimately obtained Total Annihilation game data from an installation they are authorized to use, for example:
 
 ```sh
-./build/rwe --data-path "/path/to/Total Annihilation"
+./build-public/rwe --data-path "/path/to/Total Annihilation"
 ```
 
-It also looks in the traditional default location:
+The engine can read original visual assets from that external installation. This does not grant permission to redistribute those assets or screenshots of them. Do not add retail archives, executables, saves, game-derived artwork or promotional game logos to the source distribution.
 
-```text
-~/.rwe/Data
-```
+The publication profile has no custom application icon. It uses `RWE_MACOS_ICON_FORMAT=NONE`; it does not redistribute an operating-system icon image. The approved private development icon is outside this distribution.
 
-Typical data includes files such as:
+## Validation scope
 
-```text
-*.hpi
-*.ufo
-*.ccx
-*.gpf
-*.gp3
-```
-
-Do not commit retail game data, archives, executables, or other proprietary Total Annihilation material to this repository.
+The reviewed executable inputs retain the existing Phase 10E result: **583 tests / 695,342 assertions passed**. Phase 10I changes documentation and license notices only and reuses that evidence; it does not claim a fresh test run. Human gameplay acceptance, complete mission coverage, live multiplayer, cross-architecture determinism and clean external-Mac compatibility remain qualified or pending.
 
 ## Building on Apple Silicon macOS
 
@@ -124,46 +77,10 @@ Graphics tests require an available graphics session and the source-root shader 
 
 The standalone packaging helper remains a local validation tool. Its strict release policy still requires an icon and signing; this source candidate does not claim binary-release readiness.
 
-## Development Rules
+## License and names
 
-Compatibility work retains the established rules below. Source publication constraints are recorded in [PUBLICATION.md](PUBLICATION.md).
+The RWE-derived work is provided under GNU GPL version 3; see [LICENSE](LICENSE). Third-party files retain their own applicable licenses, listed in [LICENSE_INVENTORY.md](LICENSE_INVENTORY.md) and [THIRD_PARTY_REVIEW.md](THIRD_PARTY_REVIEW.md). Keep existing copyright, attribution and warranty notices. The software is provided without warranty as described in those licenses.
 
-In particular:
+Total Annihilation, its logos and original content belong to their respective rights holders. The source licenses do not grant rights to game data, artwork or trademarks. "TA Transplant" is the owner-approved project name. This disclaimer does not by itself establish trademark clearance or rights-holder permission.
 
-1. Original Total Annihilation behavior is the compatibility target.
-2. RWE's existing implementation remains the starting point; rewrites require evidence.
-3. Native arm64 is preferred over satisfying dependencies through Rosetta.
-4. Test expectations should not be changed simply to hide platform failures.
-5. Behavioral changes should be supported by a failing test, observed divergence, documented platform contract, disassembly, or other concrete evidence.
-6. Work should proceed one compatibility layer at a time.
-7. Original copyrighted assets remain outside Git.
-
-## Repository Layout
-
-```text
-src/rwe/          C++ engine and simulation
-shaders/          OpenGL shaders
-proto/            network protocol definitions
-launcher/         Electron/TypeScript launcher and lobby
-libs/             vendored/submodule dependencies
-PUBLICATION.md   source provenance, exclusions, and validation limits
-cmake/            CMake support modules
-```
-
-## Platform Notes
-
-The upstream engine also targets Windows and Linux. This fork's additional validation and compatibility work is currently centered on Apple Silicon macOS.
-
-A Metal renderer rewrite is **not** currently required: the audited Apple Silicon system successfully created the existing OpenGL core context. Likewise, SDL3 is already present in the upstream codebase, so this project does not perform a separate SDL migration.
-
-## License
-
-The RWE-derived source in this repository is distributed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
-
-The GPL license applies to the project source code, not to original Total Annihilation assets or other proprietary content supplied by the user.
-
-## Legal / Non-Affiliation Notice
-
-Total Annihilation and its original copyrighted content remain the property of their respective rights holders.
-
-TA Transplant is an independent preservation and compatibility project. It is not affiliated with or endorsed by the original developers, publishers, or rights holders, and it does not redistribute the original game.
+The Electron launcher source and pinned dependency references are included for source completeness. No installed npm packages or launcher binary are included. Existing upstream service endpoints are source references, not a claim that this fork operates or is endorsed by those services.
