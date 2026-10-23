@@ -4,6 +4,8 @@ on:
     branches: [master, gh-actions]
   pull_request:
     branches: [master]
+permissions:
+  contents: read
 jobs:
   build-linux:
     strategy:
@@ -70,9 +72,9 @@ jobs:
           npm run tsc
           npm test
           npm run lint
-      - name: package launcher
+      - name: build launcher
         working-directory: launcher
-        run: npm run package
+        run: npm run build:all:prod
       - name: restore protobuf
         id: cache-protobuf-restore
         uses: actions/cache/restore@v5
@@ -123,12 +125,12 @@ jobs:
           npm run tsc
           npm test
           npm run lint
-      - name: package launcher
+      - name: build launcher
         working-directory: launcher
-        run: npm run package
+        run: npm run build:all:prod
       - run: python3 fetch-msvc-libs.py
       - name: install tools
-        run: choco install sccache nsis -y
+        run: choco install sccache -y
       - name: restore sccache
         uses: actions/cache@v5
         with:
@@ -145,21 +147,6 @@ jobs:
       - name: test rwe
         working-directory: build
         run: .\${{ matrix.configuration }}\rwe_test.exe
-      - name: package rwe
-        working-directory: build
-        run: cmake --build . --target package --config ${{ matrix.configuration }} --parallel 4
-      - name: upload zip artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: RWE Zip ${{ runner.os }} MSVC ${{ matrix.configuration }}
-          path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.zip
-          if-no-files-found: error
-      - name: upload installer artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: RWE Installer ${{ runner.os }} MSVC ${{ matrix.configuration }}
-          path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.exe
-          if-no-files-found: error
   build-windows-mingw64:
     strategy:
       matrix:
@@ -186,11 +173,9 @@ jobs:
           npm run tsc
           npm test
           npm run lint
-      - name: package launcher
+      - name: build launcher
         working-directory: launcher
-        run: npm run package
-      - name: install nsis
-        run: choco install nsis -y
+        run: npm run build:all:prod
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -240,19 +225,3 @@ jobs:
         working-directory: build
         run: ./rwe_test
         shell: msys2 {0}
-      - name: package rwe
-        working-directory: build
-        run: make package
-        shell: msys2 {0}
-      - name: upload zip artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: RWE Zip ${{ runner.os }} MinGW64 ${{ matrix.configuration }}
-          path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.zip
-          if-no-files-found: error
-      - name: upload installer artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: RWE Installer ${{ runner.os }} MinGW64 ${{ matrix.configuration }}
-          path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.exe
-          if-no-files-found: error
