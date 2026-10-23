@@ -9,7 +9,12 @@ build_script:
   - ps: Update-AppveyorBuild -Version "$(git describe --dirty=-d)-$env:APPVEYOR_BUILD_NUMBER"
   - '%APPVEYOR_BUILD_FOLDER%\appveyor.bat'
 
+# Engine and launcher tests run inside build_script.
 test: off
+
+# Source-only CI: keep compiled outputs on the worker.
+# External projects must use this file; UI/custom YAML overrides need review.
+artifacts: []
 deploy: off
 
 configuration:

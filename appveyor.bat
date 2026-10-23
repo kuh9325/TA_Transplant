@@ -8,7 +8,7 @@ CALL npm ci || goto :error
 CALL npm run tsc || goto :error
 CALL npm test || goto :error
 CALL npm run lint || goto :error
-CALL npm run package || goto :error
+CALL npm run build:all:prod || goto :error
 cd .. || goto :error
 
 rem Build RWE

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Builds and publishes the MSYS2/MinGW64 version of RWE.
+# Builds and tests the MSYS2/MinGW64 version of RWE.
 
 set -euo pipefail
 
@@ -40,15 +40,5 @@ pushd build
 cmake -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=$Configuration ..
 make -j 2
 ./rwe_test
-
-# Create the build artifacts
-make -j 2 package
-
-# Push the build artifacts
-pushd dist
-for i in *; do
-    appveyor PushArtifact "$i"
-done
-popd
 
 popd
