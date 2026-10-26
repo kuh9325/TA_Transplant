@@ -4,7 +4,7 @@ TA Transplant is an independently developed Apple Silicon / macOS compatibility 
 
 **Unofficial independent project.** TA Transplant is not officially affiliated with, sponsored by, or endorsed by the rights holders of Total Annihilation, its original developers or publishers, or the upstream RWE project. References to Total Annihilation identify the game and data formats this software aims to support. They do not imply an official port or release.
 
-**Status:** owner-approved Option B source publication candidate. The TA Transplant name, independent/unofficial disclaimer, icon-free source scope, exclusion of proprietary retail assets, sanitized history, and retained upstream attribution/license notices are final owner decisions. Phase 10J resolves the source-provenance review. Remote publication remains separately unauthorized. No binary release is approved.
+**Status:** source publication completed on 2026-10-23 at commit [`deddba33`](https://github.com/kuh9325/TA_Transplant/commit/deddba33dd11a9d0616e9caf9e40434f71714478). The published scope retains the owner-approved TA Transplant name, independent/unofficial disclaimer, icon-free source, exclusion of proprietary retail assets, sanitized history, and upstream attribution/license notices. No binary release is approved.
 
 ## Source and attribution
 
@@ -75,7 +75,7 @@ Graphics tests require an available graphics session and the source-root shader 
 ./build-public/rwe --data-path "/path/to/Total Annihilation"
 ```
 
-The standalone packaging helper remains a local validation tool. Its strict release policy still requires an icon and signing; this source candidate does not claim binary-release readiness.
+The standalone packaging helper remains a local validation tool. Its strict release policy still requires an icon and signing; this source publication does not claim binary-release readiness.
 
 ## License and names
 

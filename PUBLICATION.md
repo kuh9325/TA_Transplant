@@ -1,5 +1,11 @@
 # Publication source provenance and constraints
 
+**Current status — 2026-10-26:** source publication completed on 2026-10-23 at commit [`deddba33dd11a9d0616e9caf9e40434f71714478`](https://github.com/kuh9325/TA_Transplant/commit/deddba33dd11a9d0616e9caf9e40434f71714478), tree `7132b91a2d59f5f55d9e5ab241d7d0bac2d5a256`. The published engine, tests, protocol and shaders match the adopted native development baseline. Publication is source-only: private development history, retail assets, saves, application bundles and the disputed private icon remain excluded. No binary release is approved.
+
+The dated preparation record below is retained for provenance. Its statements that the tree was uncommitted or remote publication was unauthorized describe the earlier review stages and are superseded by the completed source publication above. Validation qualifications and license obligations remain in effect.
+
+## Historical preparation record (2026-10-20–22)
+
 Modified work prepared 2026-10-20; publication documentation and notices revised 2026-10-21 and 2026-10-22. This is an uncommitted Phase 10K final pre-flight tree, not an approved release.
 
 **Owner approval update — 2026-10-22:** The project name TA Transplant, Option B source candidate, exclusion of disputed application icons and proprietary Total Annihilation retail assets, independent/unofficial disclaimer, email-sanitized publication history, and preservation of upstream attribution/license notices are FINAL and approved. Earlier dated references to pending content/branding adoption in this document or the Phase 10J addendum are superseded by this decision. This is not authorization to rewrite remote history, push, force-push, upload, or perform any GitHub write.
